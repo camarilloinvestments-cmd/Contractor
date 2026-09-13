@@ -5,8 +5,8 @@ node_modules
 out
 dist
 
-# Platform symlink - resolved fresh during the image build
-yarn.lock
+# NOTE: yarn.lock is intentionally NOT ignored - it is committed and required
+# by the Dockerfile (COPY package.json yarn.lock ./) for reproducible installs.
 
 # Secrets - never bake real credentials into the image.
 # Provide configuration at runtime via docker-compose / --env-file instead.
