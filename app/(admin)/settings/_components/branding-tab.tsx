@@ -11,7 +11,7 @@ import { toast } from 'sonner';
 type Profile = Record<string, any>;
 
 const FIELDS: { key: string; label: string; placeholder?: string; type?: string }[] = [
-  { key: 'companyName', label: 'Company Name *', placeholder: 'FiberTrack Pro' },
+  { key: 'companyName', label: 'Company Name *', placeholder: 'OS1 Fiber Track Pro' },
   { key: 'legalName', label: 'Legal Name' },
   { key: 'tagline', label: 'Tagline', placeholder: 'Fiber Construction Services' },
   { key: 'logoUrl', label: 'Logo URL', placeholder: 'https://www.k2-industries.com/cdn/shop/files/W_2_85a5be16-b9bc-4fab-bb78-75143cb1686d.jpg?v=1776907597&width=1214' },

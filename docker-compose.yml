@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# FiberTrack Pro - self-hosting stack
+# OS1 Fiber Track Pro - self-hosting stack
 #
 #   1. Copy .env.docker.example to .env and fill in the values.
 #   2. Run:  docker compose up -d --build
@@ -53,6 +53,14 @@ services:
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_BUCKET_NAME: ${AWS_BUCKET_NAME:-}
       AWS_FOLDER_PREFIX: ${AWS_FOLDER_PREFIX:-}
+
+      # --- Secret encryption key (REQUIRED for SMTP/integration secrets) ---
+      # Generate once with:  openssl rand -hex 32   (store in your .env, never in git)
+      # Passed through from the host .env so the app can encrypt/decrypt secrets
+      # at rest (AES-256-GCM). Left optional here so the container still boots and
+      # reports "Encryption configuration: MISSING" (fail-closed) if it is unset,
+      # rather than refusing to start.
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
     ports:
       - "${APP_PORT:-3000}:3000"
 

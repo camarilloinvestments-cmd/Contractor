@@ -29,6 +29,7 @@ export type EmailSettingsInput = {
   secure?: boolean;
   username?: string | null;
   password?: string | null; // plaintext from the form; empty/undefined = keep existing
+  clearPassword?: boolean; // explicit request to remove the stored password
   fromName?: string | null;
   fromEmail?: string | null;
   replyTo?: string | null;
@@ -86,8 +87,11 @@ export async function saveEmailSettings(input: EmailSettingsInput): Promise<Emai
     replyTo: input.replyTo,
   };
 
-  // Only touch the password when a non-empty new value is provided.
-  if (input.password != null && input.password.length > 0) {
+  // Explicit clear takes precedence: remove the stored ciphertext.
+  if (input.clearPassword) {
+    data.passwordEncrypted = null;
+  } else if (input.password != null && input.password.length > 0) {
+    // Only touch the password when a non-empty new value is provided.
     if (!isEncryptionAvailable()) {
       throw new Error(
         'Cannot store SMTP password: APP_ENCRYPTION_KEY is not configured (fail-closed).'

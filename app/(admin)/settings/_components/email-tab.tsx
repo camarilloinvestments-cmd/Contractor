@@ -8,10 +8,11 @@ import { Switch } from '@/components/ui/switch';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Loader2, Save, Send, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
+import { SecretCredentialField, EMPTY_SECRET, type SecretCredentialValue } from '@/components/secret-credential-field';
 
 export function EmailTab() {
   const [s, setS] = useState<any>({ enabled: false, host: '', port: 587, secure: false, username: '', fromName: '', fromEmail: '', replyTo: '', hasPassword: false });
-  const [password, setPassword] = useState('');
+  const [cred, setCred] = useState<SecretCredentialValue>(EMPTY_SECRET);
   const [encAvailable, setEncAvailable] = useState(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -38,13 +39,13 @@ export function EmailTab() {
       const res = await fetch('/api/settings/email', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...s, password: password || undefined }),
+        body: JSON.stringify({ ...s, password: cred.password || undefined, clearPassword: cred.clear || undefined }),
       });
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
         throw new Error(e.error || 'save failed');
       }
-      setPassword('');
+      setCred(EMPTY_SECRET);
       toast.success('Email settings saved');
       load();
     } catch (e: any) {
@@ -105,8 +106,14 @@ export function EmailTab() {
             <div className="flex items-center gap-3"><Switch checked={!!s.secure} onCheckedChange={(v: boolean) => set('secure', v)} /><Label>Use TLS/SSL (secure)</Label></div>
             <div className="space-y-1"><Label>Username</Label><Input value={s.username ?? ''} onChange={(e: any) => set('username', e.target.value)} /></div>
             <div className="space-y-1">
-              <Label>Password {s.hasPassword ? '(set — leave blank to keep)' : ''}</Label>
-              <Input type="password" value={password} placeholder={s.hasPassword ? '••••••••' : ''} disabled={!encAvailable} onChange={(e: any) => setPassword(e.target.value)} />
+              <SecretCredentialField
+                label="Password"
+                configured={!!s.hasPassword}
+                disabled={!encAvailable}
+                disabledReason="APP_ENCRYPTION_KEY is not configured on the server"
+                value={cred}
+                onChange={setCred}
+              />
             </div>
             <div className="space-y-1"><Label>From Name</Label><Input value={s.fromName ?? ''} onChange={(e: any) => set('fromName', e.target.value)} /></div>
             <div className="space-y-1"><Label>From Email</Label><Input value={s.fromEmail ?? ''} placeholder="noreply@example.com" onChange={(e: any) => set('fromEmail', e.target.value)} /></div>

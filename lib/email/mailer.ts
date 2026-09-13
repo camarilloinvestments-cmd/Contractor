@@ -94,7 +94,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
 
   try {
     const { transport, settings } = await buildTransport();
-    const fromName = settings.fromName || 'FiberTrack Pro';
+    const fromName = settings.fromName || 'OS1 Fiber Track Pro';
     const info = await transport.sendMail({
       from: `"${fromName}" <${settings.fromEmail}>`,
       to: input.to,

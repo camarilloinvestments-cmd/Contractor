@@ -336,7 +336,7 @@ async function main() {
     update: {},
     create: {
       id: 'default',
-      companyName: 'FiberTrack Pro',
+      companyName: 'OS1 Fiber Track Pro',
       tagline: 'Fiber Construction Services',
       primaryColor: '#1e40af',
       accentColor: '#0891b2',

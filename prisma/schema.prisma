@@ -326,7 +326,7 @@ model PayoutRecord {
 // tenantId without altering existing columns.
 model CompanyProfile {
   id            String   @id @default("default")
-  companyName   String   @default("FiberTrack Pro")
+  companyName   String   @default("OS1 Fiber Track Pro")
   legalName     String?
   tagline       String?  @default("Fiber Construction Services")
   logoUrl       String?

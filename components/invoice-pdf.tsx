@@ -20,7 +20,7 @@ type Branding = {
 };
 
 const DEFAULTS: { companyName: string; tagline: string; primaryColor: string; accentColor: string; invoiceFooter: string } = {
-  companyName: 'FiberTrack Pro',
+  companyName: 'OS1 Fiber Track Pro',
   tagline: 'Fiber Construction Services',
   primaryColor: '#1e40af',
   accentColor: '#0891b2',

@@ -4,12 +4,20 @@
 import pkg from '../package.json';
 
 export const APP_VERSION: string = (pkg as { version?: string }).version ?? '0.0.0';
-export const APP_NAME = 'FiberTrack Pro';
+
+// FIXED product identity. White-label deployments may show a custom company/brand
+// name in the UI (CompanyProfile.companyName), but the underlying software product
+// is always this and is never customer-editable.
+export const PRODUCT_NAME = 'OS1 Fiber Track Pro';
+export const PRODUCT_SLUG = 'os1-fiber-track-pro';
+// Backward-compatible alias (previously the product name constant).
+export const APP_NAME = PRODUCT_NAME;
 
 // Build/runtime metadata helper used by the health endpoint and UI footer.
 export function getVersionInfo() {
   return {
-    name: APP_NAME,
+    name: PRODUCT_NAME,
+    product: PRODUCT_NAME,
     version: APP_VERSION,
     node: process.version,
     environment: process.env.NODE_ENV ?? 'development',

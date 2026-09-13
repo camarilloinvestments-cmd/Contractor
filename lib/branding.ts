@@ -32,7 +32,7 @@ export type CompanyBranding = {
 
 export const FALLBACK_BRANDING: CompanyBranding = {
   id: DEFAULT_PROFILE_ID,
-  companyName: 'FiberTrack Pro',
+  companyName: 'OS1 Fiber Track Pro',
   legalName: null,
   tagline: 'Fiber Construction Services',
   logoUrl: null,

@@ -28,11 +28,13 @@ const adminNavItems = [
 
 export function AdminSidebar({
   user,
-  companyName = 'FiberTrack Pro',
+  companyName = 'OS1 Fiber Track Pro',
+  productName = 'OS1 Fiber Track Pro',
   appVersion,
 }: {
   user: { name: string; email: string; role: string };
   companyName?: string;
+  productName?: string;
   appVersion?: string;
 }) {
   const pathname = usePathname();
@@ -82,7 +84,7 @@ export function AdminSidebar({
           <div className="mb-3">
             <p className="text-sm font-medium truncate">{user?.name ?? 'User'}</p>
             <p className="text-xs text-slate-400 truncate">{user?.role ?? ''}</p>
-            {appVersion && <p className="text-[10px] text-slate-500 mt-1 font-mono">v{appVersion}</p>}
+            {appVersion && <p className="text-[10px] text-slate-500 mt-1 font-mono">{productName} v{appVersion}</p>}
           </div>
         )}
         <div className="flex items-center gap-2">

@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 
-export function LoginForm({ companyName = 'FiberTrack Pro' }: { companyName?: string }) {
+export function LoginForm({ companyName = 'OS1 Fiber Track Pro' }: { companyName?: string }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');

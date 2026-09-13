@@ -2,7 +2,7 @@ import { auth } from '@/auth';
 import { redirect } from 'next/navigation';
 import { AdminSidebar } from './_components/admin-sidebar';
 import { getCompanyProfile } from '@/lib/branding';
-import { APP_VERSION } from '@/lib/version';
+import { APP_VERSION, PRODUCT_NAME } from '@/lib/version';
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
@@ -13,7 +13,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <AdminSidebar user={session.user} companyName={branding.companyName} appVersion={APP_VERSION} />
+      <AdminSidebar user={session.user} companyName={branding.companyName} productName={PRODUCT_NAME} appVersion={APP_VERSION} />
       <main className="flex-1 overflow-y-auto bg-background">
         {children}
       </main>

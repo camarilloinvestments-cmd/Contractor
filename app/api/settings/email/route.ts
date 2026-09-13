@@ -31,6 +31,7 @@ export async function PUT(req: Request) {
       secure: body.secure,
       username: body.username,
       password: body.password, // plaintext; empty keeps existing
+      clearPassword: !!body.clearPassword,
       fromName: body.fromName,
       fromEmail: body.fromEmail,
       replyTo: body.replyTo,
@@ -40,7 +41,12 @@ export async function PUT(req: Request) {
       action: 'email_settings.update',
       entityType: 'EmailSettings',
       entityId: saved.id,
-      metadata: { enabled: saved.enabled, host: saved.host, passwordChanged: !!body.password },
+      metadata: {
+        enabled: saved.enabled,
+        host: saved.host,
+        passwordChanged: !!body.password,
+        passwordCleared: !!body.clearPassword,
+      },
       ...requestMeta(req),
     });
     return NextResponse.json(saved);
