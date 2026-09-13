@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Loader2, Save } from 'lucide-react';
+import { Loader2, Save, Upload, ImageIcon, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 type Profile = Record<string, any>;
@@ -14,7 +14,6 @@ const FIELDS: { key: string; label: string; placeholder?: string; type?: string 
   { key: 'companyName', label: 'Company Name *', placeholder: 'OS1 Fiber Track Pro' },
   { key: 'legalName', label: 'Legal Name' },
   { key: 'tagline', label: 'Tagline', placeholder: 'Fiber Construction Services' },
-  { key: 'logoUrl', label: 'Logo URL', placeholder: 'https://www.k2-industries.com/cdn/shop/files/W_2_85a5be16-b9bc-4fab-bb78-75143cb1686d.jpg?v=1776907597&width=1214' },
   { key: 'address', label: 'Address' },
   { key: 'city', label: 'City' },
   { key: 'state', label: 'State' },
@@ -32,6 +31,7 @@ export function BrandingTab() {
   const [profile, setProfile] = useState<Profile>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     fetch('/api/settings/branding')
@@ -42,6 +42,35 @@ export function BrandingTab() {
   }, []);
 
   const set = (k: string, v: string) => setProfile((p) => ({ ...p, [k]: v }));
+
+  const uploadLogo = async (file: File) => {
+    setUploading(true);
+    try {
+      const presign = await fetch('/api/settings/branding/logo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, contentType: file.type }),
+      });
+      const pj = await presign.json();
+      if (!presign.ok) throw new Error(pj?.error || 'Upload preparation failed');
+      const put = await fetch(pj.uploadUrl, { method: 'PUT', body: file });
+      if (!put.ok) throw new Error('Upload failed');
+      setProfile((p) => ({
+        ...p,
+        logoUrl: pj.publicUrl,
+        logoStoragePath: pj.cloud_storage_path,
+        logoContentType: pj.contentType,
+      }));
+      toast.success('Logo uploaded — click Save Branding to apply');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to upload logo');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const clearLogo = () =>
+    setProfile((p) => ({ ...p, logoUrl: '', logoStoragePath: '', logoContentType: '' }));
 
   const save = async () => {
     if (!profile.companyName || String(profile.companyName).trim().length === 0) {
@@ -73,6 +102,43 @@ export function BrandingTab() {
         <CardDescription>Controls the company name, contact details, colors, and invoice identity across the app.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="space-y-2 rounded-lg border p-4">
+          <Label>Company Logo</Label>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted">
+              {profile.logoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={profile.logoUrl} alt="Company logo" className="h-full w-full object-contain" />
+              ) : (
+                <ImageIcon className="h-8 w-8 text-muted-foreground" />
+              )}
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <input
+                  id="logo-upload"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                  className="hidden"
+                  onChange={(e: any) => { const f = e.target.files?.[0]; if (f) uploadLogo(f); e.target.value = ''; }}
+                />
+                <Button type="button" variant="outline" size="sm" disabled={uploading}
+                  onClick={() => document.getElementById('logo-upload')?.click()}>
+                  {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                  Upload Logo
+                </Button>
+                {profile.logoUrl ? (
+                  <Button type="button" variant="ghost" size="sm" onClick={clearLogo}>
+                    <X className="mr-1 h-4 w-4" />Remove
+                  </Button>
+                ) : null}
+              </div>
+              <p className="text-xs text-muted-foreground">PNG, JPG, WEBP, GIF, or SVG. Used across the app, invoices, and closeout deliverables.</p>
+              <Input value={profile.logoUrl ?? ''} placeholder="… or paste an external logo URL"
+                onChange={(e: any) => set('logoUrl', e.target.value)} />
+            </div>
+          </div>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {FIELDS.map((f) => (
             <div key={f.key} className="space-y-1">

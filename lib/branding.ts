@@ -14,6 +14,8 @@ export type CompanyBranding = {
   legalName: string | null;
   tagline: string | null;
   logoUrl: string | null;
+  logoStoragePath: string | null;
+  logoContentType: string | null;
   address: string | null;
   city: string | null;
   state: string | null;
@@ -36,6 +38,8 @@ export const FALLBACK_BRANDING: CompanyBranding = {
   legalName: null,
   tagline: 'Fiber Construction Services',
   logoUrl: null,
+  logoStoragePath: null,
+  logoContentType: null,
   address: null,
   city: null,
   state: null,
@@ -74,4 +78,52 @@ export async function upsertCompanyProfile(
     update: { ...data },
   });
   return row as CompanyBranding;
+}
+
+// Retrieve the company logo as raw bytes for server-side packaging (KMZ, PDF,
+// email). Prefers an uploaded logo (logoStoragePath -> S3 GetObject) and falls
+// back to fetching an external logoUrl over HTTP. Returns null when no logo is
+// configured or retrieval fails (callers must render gracefully without a logo).
+export async function getBrandingLogoBytes(
+  branding?: CompanyBranding
+): Promise<{ buffer: Buffer; contentType: string; ext: string } | null> {
+  const b = branding ?? (await getCompanyProfile());
+  const extFor = (ct: string): string => {
+    if (ct.includes('png')) return 'png';
+    if (ct.includes('jpeg') || ct.includes('jpg')) return 'jpg';
+    if (ct.includes('gif')) return 'gif';
+    if (ct.includes('webp')) return 'webp';
+    if (ct.includes('svg')) return 'svg';
+    return 'png';
+  };
+  try {
+    if (b.logoStoragePath) {
+      // Lazy-import so client bundles never pull in the S3 SDK.
+      const { GetObjectCommand } = await import('@aws-sdk/client-s3');
+      const { createS3Client, getBucketConfig } = await import('./aws-config');
+      const { bucketName } = getBucketConfig();
+      if (bucketName) {
+        const s3 = createS3Client();
+        const res = await s3.send(
+          new GetObjectCommand({ Bucket: bucketName, Key: b.logoStoragePath })
+        );
+        const bytes = await res.Body?.transformToByteArray();
+        if (bytes) {
+          const ct = b.logoContentType || res.ContentType || 'image/png';
+          return { buffer: Buffer.from(bytes), contentType: ct, ext: extFor(ct) };
+        }
+      }
+    }
+    if (b.logoUrl) {
+      const res = await fetch(b.logoUrl);
+      if (res.ok) {
+        const ct = res.headers.get('content-type') || b.logoContentType || 'image/png';
+        const ab = await res.arrayBuffer();
+        return { buffer: Buffer.from(ab), contentType: ct, ext: extFor(ct) };
+      }
+    }
+  } catch {
+    // fall through -> null
+  }
+  return null;
 }

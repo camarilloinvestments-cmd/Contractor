@@ -5,7 +5,8 @@ import { getCompanyProfile, upsertCompanyProfile } from '@/lib/branding';
 import { writeAudit, requestMeta } from '@/lib/audit';
 
 const EDITABLE = [
-  'companyName', 'legalName', 'tagline', 'logoUrl', 'address', 'city', 'state', 'zip',
+  'companyName', 'legalName', 'tagline', 'logoUrl', 'logoStoragePath', 'logoContentType',
+  'address', 'city', 'state', 'zip',
   'phone', 'email', 'website', 'supportEmail', 'supportPhone', 'primaryColor', 'accentColor',
   'invoicePrefix', 'invoiceFooter', 'portalUrl',
 ] as const;

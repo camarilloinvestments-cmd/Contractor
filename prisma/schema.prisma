@@ -364,6 +364,8 @@ model CompanyProfile {
   legalName     String?
   tagline       String?  @default("Fiber Construction Services")
   logoUrl       String?
+  logoStoragePath String?
+  logoContentType String?
   address       String?
   city          String?
   state         String?
