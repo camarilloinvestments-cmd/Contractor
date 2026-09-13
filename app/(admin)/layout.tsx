@@ -7,6 +7,7 @@ import { APP_VERSION, PRODUCT_NAME } from '@/lib/version';
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
   if (!session?.user) redirect('/login');
+  if (session.user.forcePasswordChange) redirect('/change-password');
   if (session.user.role === 'FIELD_WORKER') redirect('/portal');
 
   const branding = await getCompanyProfile();

@@ -6,6 +6,7 @@ import { getCompanyProfile } from '@/lib/branding';
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
   if (!session?.user) redirect('/login');
+  if (session.user.forcePasswordChange) redirect('/change-password');
 
   const branding = await getCompanyProfile();
 

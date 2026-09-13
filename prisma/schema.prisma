@@ -15,6 +15,12 @@ enum UserRole {
   FIELD_WORKER
 }
 
+enum UserStatus {
+  ACTIVE
+  DEACTIVATED
+  LOCKED
+}
+
 enum JobStatus {
   DRAFT
   ACTIVE
@@ -70,6 +76,11 @@ model User {
   name           String
   passwordHash   String
   role           UserRole  @default(FIELD_WORKER)
+  status              UserStatus @default(ACTIVE)
+  forcePasswordChange Boolean    @default(false)
+  tokenVersion        Int        @default(0)
+  deactivatedAt       DateTime?
+  lastLoginAt         DateTime?
   workerId       String?   @unique
   worker         Worker?   @relation(fields: [workerId], references: [id])
   createdAt      DateTime  @default(now())
@@ -78,6 +89,7 @@ model User {
   sessions       Session[]
 
   @@index([email])
+  @@index([status])
 }
 
 model Account {

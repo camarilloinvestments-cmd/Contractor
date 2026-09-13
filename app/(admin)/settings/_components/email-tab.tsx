@@ -13,6 +13,7 @@ import { SecretCredentialField, EMPTY_SECRET, type SecretCredentialValue } from 
 export function EmailTab() {
   const [s, setS] = useState<any>({ enabled: false, host: '', port: 587, secure: false, username: '', fromName: '', fromEmail: '', replyTo: '', hasPassword: false });
   const [cred, setCred] = useState<SecretCredentialValue>(EMPTY_SECRET);
+  const [credKey, setCredKey] = useState(0); // bump to remount the field into its masked view after a save
   const [encAvailable, setEncAvailable] = useState(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -20,7 +21,7 @@ export function EmailTab() {
   const [testTo, setTestTo] = useState('');
 
   const load = () => {
-    fetch('/api/settings/email')
+    return fetch('/api/settings/email')
       .then((r) => r.json())
       .then((d) => {
         setEncAvailable(!!d.encryptionAvailable);
@@ -29,7 +30,7 @@ export function EmailTab() {
       .catch(() => toast.error('Failed to load email settings'))
       .finally(() => setLoading(false));
   };
-  useEffect(load, []);
+  useEffect(() => { load(); }, []);
 
   const set = (k: string, v: any) => setS((p: any) => ({ ...p, [k]: v }));
 
@@ -47,7 +48,8 @@ export function EmailTab() {
       }
       setCred(EMPTY_SECRET);
       toast.success('Email settings saved');
-      load();
+      await load();
+      setCredKey((k) => k + 1);
     } catch (e: any) {
       toast.error(e.message || 'Failed to save');
     } finally {
@@ -107,6 +109,7 @@ export function EmailTab() {
             <div className="space-y-1"><Label>Username</Label><Input value={s.username ?? ''} onChange={(e: any) => set('username', e.target.value)} /></div>
             <div className="space-y-1">
               <SecretCredentialField
+                key={credKey}
                 label="Password"
                 configured={!!s.hasPassword}
                 disabled={!encAvailable}

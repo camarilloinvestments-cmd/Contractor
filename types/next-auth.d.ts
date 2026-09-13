@@ -8,12 +8,15 @@ declare module 'next-auth' {
       name: string;
       role: string;
       workerId: string | null;
+      forcePasswordChange?: boolean;
     };
   }
 
   interface User {
     role: string;
     workerId: string | null;
+    tokenVersion?: number;
+    forcePasswordChange?: boolean;
   }
 }
 
@@ -22,5 +25,7 @@ declare module 'next-auth/jwt' {
     id: string;
     role: string;
     workerId: string | null;
+    tokenVersion?: number;
+    forcePasswordChange?: boolean;
   }
 }
