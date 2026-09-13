@@ -19,11 +19,12 @@ ENV NODE_ENV=production \
 WORKDIR /app
 
 # 1) Install dependencies first for better layer caching.
-#    (yarn.lock is intentionally not copied - on the source machine it is a
-#     symlink into the build platform. Dependencies are resolved from
-#     package.json instead so the image builds on any machine.)
-COPY package.json ./
-RUN yarn install --network-timeout 600000
+#    --production=false forces devDependencies (tailwindcss, postcss,
+#    tailwindcss-animate, etc.) to install even though NODE_ENV=production -
+#    they are required by `yarn build`. A committed yarn.lock makes the install
+#    fully reproducible from a clean clone.
+COPY package.json yarn.lock ./
+RUN yarn install --frozen-lockfile --production=false --network-timeout 600000
 
 # 2) Copy the rest of the application source.
 COPY . .
