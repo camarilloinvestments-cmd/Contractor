@@ -16,7 +16,7 @@ export async function GET() {
     select: {
       id: true, email: true, name: true, role: true, status: true,
       forcePasswordChange: true, workerId: true, createdAt: true,
-      deactivatedAt: true, lastLoginAt: true,
+      deactivatedAt: true, lastLoginAt: true, mfaEnabled: true,
     },
   });
   return NextResponse.json(users);

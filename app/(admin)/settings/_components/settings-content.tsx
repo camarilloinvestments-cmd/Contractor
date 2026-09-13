@@ -2,11 +2,12 @@
 import { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FadeIn } from '@/components/ui/animate';
-import { Building2, Mail, FileText, ScrollText } from 'lucide-react';
+import { Building2, Mail, FileText, ScrollText, ShieldCheck } from 'lucide-react';
 import { BrandingTab } from './branding-tab';
 import { EmailTab } from './email-tab';
 import { TemplatesTab } from './templates-tab';
 import { EmailLogsTab } from './email-logs-tab';
+import { SecurityTab } from './security-tab';
 
 export function SettingsContent() {
   const [tab, setTab] = useState('branding');
@@ -15,20 +16,22 @@ export function SettingsContent() {
       <FadeIn>
         <div>
           <h1 className="text-2xl font-display font-bold tracking-tight">Settings</h1>
-          <p className="text-muted-foreground">Company branding, email delivery, templates, and delivery logs</p>
+          <p className="text-muted-foreground">Company branding, email delivery, templates, delivery logs, and security</p>
         </div>
       </FadeIn>
       <Tabs value={tab} onValueChange={setTab} className="space-y-6">
-        <TabsList className="grid w-full max-w-2xl grid-cols-4">
+        <TabsList className="grid w-full max-w-3xl grid-cols-5">
           <TabsTrigger value="branding"><Building2 className="w-4 h-4 mr-2" />Branding</TabsTrigger>
           <TabsTrigger value="email"><Mail className="w-4 h-4 mr-2" />Email</TabsTrigger>
           <TabsTrigger value="templates"><FileText className="w-4 h-4 mr-2" />Templates</TabsTrigger>
           <TabsTrigger value="logs"><ScrollText className="w-4 h-4 mr-2" />Logs</TabsTrigger>
+          <TabsTrigger value="security"><ShieldCheck className="w-4 h-4 mr-2" />Security</TabsTrigger>
         </TabsList>
         <TabsContent value="branding"><BrandingTab /></TabsContent>
         <TabsContent value="email"><EmailTab /></TabsContent>
         <TabsContent value="templates"><TemplatesTab /></TabsContent>
         <TabsContent value="logs"><EmailLogsTab /></TabsContent>
+        <TabsContent value="security"><SecurityTab /></TabsContent>
       </Tabs>
     </div>
   );

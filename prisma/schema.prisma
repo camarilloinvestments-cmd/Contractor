@@ -81,15 +81,37 @@ model User {
   tokenVersion        Int        @default(0)
   deactivatedAt       DateTime?
   lastLoginAt         DateTime?
+  mfaEnabled          Boolean    @default(false)
+  mfaSecret           String?
+  mfaEnrolledAt       DateTime?
+  mfaLastVerifiedAt   DateTime?
   workerId       String?   @unique
   worker         Worker?   @relation(fields: [workerId], references: [id])
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   accounts       Account[]
   sessions       Session[]
+  mfaRecoveryCodes MfaRecoveryCode[]
 
   @@index([email])
   @@index([status])
+}
+
+model MfaRecoveryCode {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model MfaPolicy {
+  role      UserRole @id
+  required  Boolean  @default(false)
+  updatedAt DateTime @updatedAt
 }
 
 model Account {

@@ -9,6 +9,7 @@ declare module 'next-auth' {
       role: string;
       workerId: string | null;
       forcePasswordChange?: boolean;
+      mfaEnrollmentRequired?: boolean;
     };
   }
 
@@ -27,5 +28,6 @@ declare module 'next-auth/jwt' {
     workerId: string | null;
     tokenVersion?: number;
     forcePasswordChange?: boolean;
+    mfaEnrollmentRequired?: boolean;
   }
 }

@@ -88,6 +88,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         await audit('user.reset_password', { email: target.email, generated: !provided, forceChange });
         return NextResponse.json({ ok: true, generatedPassword: generated ?? undefined });
       }
+      case 'reset-mfa': {
+        // Admin reset of MFA: disable, wipe secret + recovery codes, force
+        // re-authentication. If policy still requires MFA, the user will be
+        // forced to re-enroll on next login.
+        await prisma.mfaRecoveryCode.deleteMany({ where: { userId: id } });
+        await prisma.user.update({
+          where: { id },
+          data: {
+            mfaEnabled: false,
+            mfaSecret: null,
+            mfaEnrolledAt: null,
+            mfaLastVerifiedAt: null,
+            tokenVersion: { increment: 1 },
+          },
+        });
+        await audit('mfa.reset', { email: target.email });
+        return NextResponse.json({ ok: true });
+      }
       default:
         return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
     }

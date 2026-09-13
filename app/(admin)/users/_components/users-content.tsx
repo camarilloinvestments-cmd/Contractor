@@ -134,6 +134,7 @@ export function UsersContent({ currentUserId }: { currentUserId: string }) {
       deactivate: 'User deactivated', reactivate: 'User reactivated', unlock: 'User unlocked',
       'revoke-sessions': 'Sessions revoked', 'force-password-change': 'Password change required at next login',
       'clear-force-password-change': 'Forced password change cleared',
+      'reset-mfa': 'Two-factor authentication reset',
     };
     return runAction(user, action, msgs[action] ?? 'Done');
   };
@@ -193,7 +194,7 @@ export function UsersContent({ currentUserId }: { currentUserId: string }) {
           <Table>
             <TableHeader><TableRow>
               <TableHead>Name</TableHead><TableHead>Email</TableHead><TableHead>Role</TableHead>
-              <TableHead>Status</TableHead><TableHead>Last Login</TableHead><TableHead className="w-10"></TableHead>
+              <TableHead>Status</TableHead><TableHead>2FA</TableHead><TableHead>Last Login</TableHead><TableHead className="w-10"></TableHead>
             </TableRow></TableHeader>
             <TableBody>
               {(users ?? []).map((u: any) => {
@@ -210,6 +211,11 @@ export function UsersContent({ currentUserId }: { currentUserId: string }) {
                   <TableCell className="text-muted-foreground">{u?.email ?? ''}</TableCell>
                   <TableCell><span className={`px-2 py-1 rounded text-xs font-medium ${ROLE_COLORS[u?.role ?? ''] ?? ''}`}>{u?.role?.replace(/_/g, ' ') ?? ''}</span></TableCell>
                   <TableCell><span className={`px-2 py-1 rounded text-xs font-medium ${STATUS_COLORS[u?.status ?? 'ACTIVE'] ?? ''}`}>{(u?.status ?? 'ACTIVE')}</span></TableCell>
+                  <TableCell>
+                    {u?.mfaEnabled
+                      ? <span className="px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">Enrolled</span>
+                      : <span className="px-2 py-1 rounded text-xs font-medium bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300">Not enrolled</span>}
+                  </TableCell>
                   <TableCell className="text-muted-foreground">{u?.lastLoginAt ? formatDate(u.lastLoginAt) : '—'}</TableCell>
                   <TableCell>
                     <DropdownMenu>
@@ -221,6 +227,7 @@ export function UsersContent({ currentUserId }: { currentUserId: string }) {
                           ? <DropdownMenuItem onClick={() => setConfirm({ user: u, action: 'clear-force-password-change', title: 'Clear forced password change?', desc: 'The user will no longer be required to change their password at next login.' })}>Clear forced pw change</DropdownMenuItem>
                           : <DropdownMenuItem onClick={() => setConfirm({ user: u, action: 'force-password-change', title: 'Require password change?', desc: 'The user will be forced to set a new password at their next login.' })}>Require pw change</DropdownMenuItem>}
                         <DropdownMenuItem onClick={() => setConfirm({ user: u, action: 'revoke-sessions', title: 'Revoke all sessions?', desc: 'The user will be signed out of all devices immediately.' })}>Revoke sessions</DropdownMenuItem>
+                        {u?.mfaEnabled && <DropdownMenuItem className="text-red-600" onClick={() => setConfirm({ user: u, action: 'reset-mfa', title: 'Reset two-factor authentication?', desc: 'This removes the user’s authenticator and recovery codes. If 2FA is required for their role, they will be prompted to set it up again at next login.', danger: true })}>Reset 2FA</DropdownMenuItem>}
                         <DropdownMenuSeparator />
                         {u?.status === 'ACTIVE'
                           ? <DropdownMenuItem className="text-red-600" disabled={isSelf} onClick={() => setConfirm({ user: u, action: 'deactivate', title: 'Deactivate user?', desc: 'The account will be blocked from signing in and all sessions revoked.', danger: true })}>Deactivate</DropdownMenuItem>

@@ -7,6 +7,7 @@ export default async function PortalLayout({ children }: { children: React.React
   const session = await auth();
   if (!session?.user) redirect('/login');
   if (session.user.forcePasswordChange) redirect('/change-password');
+  if (session.user.mfaEnrollmentRequired) redirect('/mfa/enroll');
 
   const branding = await getCompanyProfile();
 

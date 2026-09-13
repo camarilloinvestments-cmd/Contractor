@@ -8,6 +8,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const session = await auth();
   if (!session?.user) redirect('/login');
   if (session.user.forcePasswordChange) redirect('/change-password');
+  if (session.user.mfaEnrollmentRequired) redirect('/mfa/enroll');
   if (session.user.role === 'FIELD_WORKER') redirect('/portal');
 
   const branding = await getCompanyProfile();
