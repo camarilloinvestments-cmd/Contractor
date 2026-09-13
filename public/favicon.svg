@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <rect width="256" height="256" fill="#1e40af"/>
+  <path d="M80 100 L80 156 Q80 170 94 170 L162 170 Q176 170 176 156 L176 100 Q176 86 162 86 L94 86 Q80 86 80 100 Z" fill="none" stroke="#06b6d4" stroke-width="8" stroke-linejoin="round"/>
+  <circle cx="100" cy="128" r="6" fill="#06b6d4"/>
+  <circle cx="128" cy="128" r="6" fill="#06b6d4"/>
+  <circle cx="156" cy="128" r="6" fill="#06b6d4"/>
+  <line x1="80" y1="100" x2="60" y2="80" stroke="#06b6d4" stroke-width="6" stroke-linecap="round"/>
+  <line x1="176" y1="100" x2="196" y2="80" stroke="#06b6d4" stroke-width="6" stroke-linecap="round"/>
+  <line x1="80" y1="156" x2="60" y2="176" stroke="#06b6d4" stroke-width="6" stroke-linecap="round"/>
+  <line x1="176" y1="156" x2="196" y2="176" stroke="#06b6d4" stroke-width="6" stroke-linecap="round"/>
+  <text x="128" y="220" font-family="Arial, sans-serif" font-size="32" font-weight="bold" fill="#06b6d4" text-anchor="middle" opacity="0.6">FT</text>
+</svg>

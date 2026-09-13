@@ -1,0 +1,28 @@
+# Dependencies & build artifacts (regenerated inside the image)
+node_modules
+.next
+.build
+out
+dist
+
+# Platform symlink - resolved fresh during the image build
+yarn.lock
+
+# Secrets - never bake real credentials into the image.
+# Provide configuration at runtime via docker-compose / --env-file instead.
+.env
+.env.*
+!.env.docker.example
+
+# VCS & local tooling
+.git
+.gitignore
+.vscode
+.idea
+
+# Logs & OS cruft
+*.log
+.DS_Store
+
+# Docker files themselves don't need to be in the image context copy
+Docker_README.md

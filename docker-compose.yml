@@ -1,0 +1,60 @@
+# ---------------------------------------------------------------------------
+# FiberTrack Pro - self-hosting stack
+#
+#   1. Copy .env.docker.example to .env and fill in the values.
+#   2. Run:  docker compose up -d --build
+#   3. Open: http://localhost:3000  (or your server's address)
+#
+# Default admin login (from seed data): admin@fibertrack.com / Admin123!
+# ---------------------------------------------------------------------------
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fibertrack}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fibertrack_pw}
+      POSTGRES_DB: ${POSTGRES_DB:-fibertrack}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fibertrack} -d ${POSTGRES_DB:-fibertrack}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # --- Database (points at the db service above) ---
+      DATABASE_URL: postgresql://${POSTGRES_USER:-fibertrack}:${POSTGRES_PASSWORD:-fibertrack_pw}@db:5432/${POSTGRES_DB:-fibertrack}?connect_timeout=15
+
+      # --- Authentication (REQUIRED) ---
+      # Generate a secret with:  openssl rand -base64 32
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?Set NEXTAUTH_SECRET in your .env file}
+      AUTH_SECRET: ${AUTH_SECRET:-${NEXTAUTH_SECRET}}
+      # Public URL users reach the app at. For a remote server use e.g.
+      # https://fibertrack.yourdomain.com
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+
+      # --- First-run seeding (idempotent). Set to false after first boot if you prefer. ---
+      SEED_ON_START: ${SEED_ON_START:-true}
+
+      # --- File storage (photos / documents). Any S3-compatible bucket. ---
+      # Uploads are disabled/error out until these are provided.
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_BUCKET_NAME: ${AWS_BUCKET_NAME:-}
+      AWS_FOLDER_PREFIX: ${AWS_FOLDER_PREFIX:-}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+
+volumes:
+  db_data:
