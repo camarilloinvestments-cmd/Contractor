@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 
-export function LoginForm() {
+export function LoginForm({ companyName = 'FiberTrack Pro' }: { companyName?: string }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -45,7 +45,7 @@ export function LoginForm() {
           <div className="mx-auto w-14 h-14 bg-primary rounded-xl flex items-center justify-center mb-2">
             <Cable className="w-7 h-7 text-primary-foreground" />
           </div>
-          <CardTitle className="text-2xl font-display tracking-tight">FiberTrack Pro</CardTitle>
+          <CardTitle className="text-2xl font-display tracking-tight">{companyName}</CardTitle>
           <CardDescription>Sign in to manage your fiber construction projects</CardDescription>
         </CardHeader>
         <CardContent>

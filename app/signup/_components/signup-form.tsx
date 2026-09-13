@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 
-export function SignupForm() {
+export function SignupForm({ companyName = 'FiberTrack Pro' }: { companyName?: string }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -53,7 +53,7 @@ export function SignupForm() {
             <Cable className="w-7 h-7 text-primary-foreground" />
           </div>
           <CardTitle className="text-2xl font-display tracking-tight">Create Account</CardTitle>
-          <CardDescription>Join FiberTrack Pro to manage your field work</CardDescription>
+          <CardDescription>Join {companyName} to manage your field work</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">

@@ -31,3 +31,10 @@ next-env.d.ts
 Thumbs.db
 .idea/
 .vscode/
+
+# ===== Platform / environment artifacts (never commit) =====
+.abacus.donotdelete
+
+# ===== Auto-generated document previews (docs are authored as .md) =====
+*.pdf
+*.docx

@@ -105,9 +105,18 @@ Copy `.env.docker.example` to `.env` and fill in the values. **Never commit your
 | `AWS_SECRET_ACCESS_KEY` | Secret key for S3                                                        |
 | `AWS_BUCKET_NAME`     | S3 bucket for photos & documents                                          |
 | `AWS_FOLDER_PREFIX`   | Optional key prefix inside the bucket (include trailing slash)             |
+| `APP_ENCRYPTION_KEY`  | Encrypts the SMTP password for the email feature — `openssl rand -base64 32` (required for email) |
 
 > File uploads (photos & documents) require the `AWS_*` values. Everything else — jobs,
 > billing, GPS records, invoices, and reports — works without them.
+>
+> The email feature (invoice sending, branding-aware templates) requires
+> `APP_ENCRYPTION_KEY`; SMTP host/user/password are configured in-app at
+> **Settings → Email**. Keep this key backed up — see `docs/MIGRATIONS.md`.
+
+> **Upgrading from v1.0.0?** The schema is now managed by database migrations that
+> apply automatically on container start, auto-baselining an existing v1.0.0
+> database without data loss. Follow `docs/MIGRATIONS.md`.
 
 ---
 

@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { renderToBuffer } from '@react-pdf/renderer';
 import React from 'react';
 import { InvoicePDF } from '@/components/invoice-pdf';
+import { getCompanyProfile } from '@/lib/branding';
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -21,8 +22,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     });
     if (!invoice) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
+    const branding = await getCompanyProfile();
     const buffer = await renderToBuffer(
-      React.createElement(InvoicePDF, { invoice: invoice as any }) as any
+      React.createElement(InvoicePDF, { invoice: invoice as any, branding: branding as any }) as any
     );
 
     return new NextResponse(buffer, {

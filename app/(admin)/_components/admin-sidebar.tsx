@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
-const navItems = [
+const baseNavItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/prime-contractors', label: 'Prime Contractors', icon: Building2 },
   { href: '/jobs', label: 'Jobs / Work Orders', icon: Briefcase },
@@ -19,12 +19,25 @@ const navItems = [
   { href: '/invoices', label: 'Invoices', icon: FileText },
   { href: '/payouts', label: 'Payouts', icon: DollarSign },
   { href: '/reports', label: 'Reports', icon: BarChart3 },
-  { href: '/users', label: 'Users', icon: Settings },
+  { href: '/users', label: 'Users', icon: Users },
 ];
 
-export function AdminSidebar({ user }: { user: { name: string; email: string; role: string } }) {
+const adminNavItems = [
+  { href: '/settings', label: 'Settings', icon: Settings },
+];
+
+export function AdminSidebar({
+  user,
+  companyName = 'FiberTrack Pro',
+  appVersion,
+}: {
+  user: { name: string; email: string; role: string };
+  companyName?: string;
+  appVersion?: string;
+}) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const navItems = user?.role === 'ADMIN' ? [...baseNavItems, ...adminNavItems] : baseNavItems;
 
   return (
     <aside className={cn(
@@ -37,7 +50,7 @@ export function AdminSidebar({ user }: { user: { name: string; email: string; ro
         </div>
         {!collapsed && (
           <div className="overflow-hidden">
-            <h1 className="text-base font-display font-bold tracking-tight">FiberTrack Pro</h1>
+            <h1 className="text-base font-display font-bold tracking-tight truncate">{companyName}</h1>
           </div>
         )}
       </div>
@@ -69,6 +82,7 @@ export function AdminSidebar({ user }: { user: { name: string; email: string; ro
           <div className="mb-3">
             <p className="text-sm font-medium truncate">{user?.name ?? 'User'}</p>
             <p className="text-xs text-slate-400 truncate">{user?.role ?? ''}</p>
+            {appVersion && <p className="text-[10px] text-slate-500 mt-1 font-mono">v{appVersion}</p>}
           </div>
         )}
         <div className="flex items-center gap-2">

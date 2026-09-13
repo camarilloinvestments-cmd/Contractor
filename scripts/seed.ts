@@ -330,6 +330,52 @@ async function main() {
     },
   });
 
+  // --- Phase 1 (v1.1.0): branding + email templates (idempotent) ---
+  await prisma.companyProfile.upsert({
+    where: { id: 'default' },
+    update: {},
+    create: {
+      id: 'default',
+      companyName: 'FiberTrack Pro',
+      tagline: 'Fiber Construction Services',
+      primaryColor: '#1e40af',
+      accentColor: '#0891b2',
+      invoicePrefix: 'INV',
+      invoiceFooter: 'Thank you for your business',
+    },
+  });
+
+  const emailTemplates = [
+    {
+      key: 'invoice_new',
+      name: 'New Invoice',
+      subject: 'Invoice {{invoice_number}} from {{company_name}}',
+      bodyHtml: `<p>Dear {{prime_contractor_name}},</p>\n<p>Please find attached invoice <strong>{{invoice_number}}</strong> dated {{invoice_date}} for the amount of <strong>{{invoice_total}}</strong>.</p>\n<p>Outstanding balance: {{invoice_balance}}</p>\n<p>If you have any questions about this invoice, contact us at {{support_email}} or {{support_phone}}.</p>\n<p>Thank you for your business,<br/>{{company_name}}<br/>{{company_website}}</p>`,
+      bodyText: `Dear {{prime_contractor_name}},\n\nPlease find attached invoice {{invoice_number}} dated {{invoice_date}} for the amount of {{invoice_total}}.\n\nOutstanding balance: {{invoice_balance}}\n\nIf you have any questions, contact us at {{support_email}} or {{support_phone}}.\n\nThank you for your business,\n{{company_name}}\n{{company_website}}`,
+    },
+    {
+      key: 'invoice_reminder',
+      name: 'Invoice Reminder',
+      subject: 'Reminder: Invoice {{invoice_number}} is due {{invoice_due_date}}',
+      bodyHtml: `<p>Dear {{prime_contractor_name}},</p>\n<p>This is a friendly reminder that invoice <strong>{{invoice_number}}</strong> for {{invoice_total}} is due on {{invoice_due_date}}.</p>\n<p>Outstanding balance: <strong>{{invoice_balance}}</strong></p>\n<p>Questions? Reach us at {{support_email}} or {{support_phone}}.</p>\n<p>{{company_name}}</p>`,
+      bodyText: `Dear {{prime_contractor_name}},\n\nThis is a friendly reminder that invoice {{invoice_number}} for {{invoice_total}} is due on {{invoice_due_date}}.\n\nOutstanding balance: {{invoice_balance}}\n\nQuestions? Reach us at {{support_email}} or {{support_phone}}.\n\n{{company_name}}`,
+    },
+    {
+      key: 'test_email',
+      name: 'Test Email',
+      subject: 'Test email from {{company_name}}',
+      bodyHtml: `<p>This is a test email from {{company_name}}.</p>\n<p>If you received this message, your outbound email configuration is working correctly.</p>`,
+      bodyText: `This is a test email from {{company_name}}.\n\nIf you received this message, your outbound email configuration is working correctly.`,
+    },
+  ];
+  for (const t of emailTemplates) {
+    await prisma.emailTemplate.upsert({
+      where: { key: t.key },
+      update: {},
+      create: t,
+    });
+  }
+
   console.log('Seeding complete!');
 }
 

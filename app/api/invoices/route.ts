@@ -10,7 +10,7 @@ export async function GET() {
   const invoices = await prisma.invoice.findMany({
     orderBy: { createdAt: 'desc' },
     include: {
-      primeContractor: { select: { companyName: true } },
+      primeContractor: { select: { companyName: true, email: true } },
       _count: { select: { items: true } },
     },
   });

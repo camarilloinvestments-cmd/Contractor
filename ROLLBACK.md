@@ -19,6 +19,42 @@ self-hosted (Docker) deployments.
 
 ---
 
+## Rolling back v1.1.0 → v1.0.0 (code-only — recommended)
+
+The v1.1.0 schema change (`0001_phase1_foundation`) is **purely additive** — it
+only adds new tables (`CompanyProfile`, `EmailSettings`, `EmailTemplate`,
+`EmailLog`, `AuditLog`), two new columns on `Invoice`, and one enum. It does not
+drop or alter anything from v1.0.0. Because of this, **v1.0.0 application code
+runs correctly against the v1.1.0 database** (it simply ignores the extra
+objects), so the safe rollback is **code-only — no database change required**:
+
+```bash
+git fetch --all --tags
+git checkout v1.0.0
+docker compose build --no-cache
+docker compose down && docker compose up -d
+docker compose ps && docker compose logs -f app
+```
+
+You do **not** need to restore a backup or reverse the migration for this path.
+Leaving the additive objects in place is harmless.
+
+> Keep your `APP_ENCRYPTION_KEY` even after rolling back — you will need it again
+> when you return to v1.1.0 so the stored SMTP password can be decrypted.
+
+### Optional: also reverse the schema
+Only if you specifically need the v1.1.0 objects removed, restore the backup you
+took **before** the upgrade (this loses any data written after the upgrade):
+
+```bash
+cat backup_pre_v1.1.0_YYYYMMDD_HHMMSS.sql | \
+  docker compose exec -T db psql -U "$POSTGRES_USER" "$POSTGRES_DB"
+```
+
+See `docs/MIGRATIONS.md` for full migration and baselining details.
+
+---
+
 ## Roll back to v1.0.0
 
 From your deployment directory on the server:

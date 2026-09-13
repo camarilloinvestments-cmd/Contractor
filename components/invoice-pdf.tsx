@@ -1,47 +1,97 @@
 import React from 'react';
-import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer';
+import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer';
 
-const styles = StyleSheet.create({
-  page: { padding: 40, fontSize: 10, fontFamily: 'Helvetica' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 30 },
-  title: { fontSize: 24, fontWeight: 'bold', color: '#1e40af' },
-  subtitle: { fontSize: 12, color: '#6b7280', marginTop: 4 },
-  section: { marginBottom: 20 },
-  sectionTitle: { fontSize: 12, fontWeight: 'bold', marginBottom: 8, color: '#1e3a5f' },
-  row: { flexDirection: 'row', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
-  headerRow: { flexDirection: 'row', paddingVertical: 6, borderBottomWidth: 2, borderBottomColor: '#1e40af', backgroundColor: '#f0f4ff' },
-  col1: { width: '45%', paddingRight: 8 },
-  col2: { width: '15%', textAlign: 'right' },
-  col3: { width: '20%', textAlign: 'right' },
-  col4: { width: '20%', textAlign: 'right', fontWeight: 'bold' },
-  bold: { fontWeight: 'bold' },
-  totalsSection: { marginTop: 20, alignItems: 'flex-end' },
-  totalRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingVertical: 4 },
-  totalLabel: { width: 120, textAlign: 'right', paddingRight: 16 },
-  totalValue: { width: 100, textAlign: 'right' },
-  grandTotal: { fontSize: 14, fontWeight: 'bold', color: '#1e40af', borderTopWidth: 2, borderTopColor: '#1e40af', paddingTop: 6, marginTop: 4 },
-  footer: { position: 'absolute', bottom: 30, left: 40, right: 40, textAlign: 'center', color: '#9ca3af', fontSize: 8 },
-  infoBlock: { marginBottom: 4 },
-  infoLabel: { color: '#6b7280', fontSize: 9 },
-});
+// Branding shape passed from the server (CompanyProfile). Optional so the
+// component still renders with sensible defaults if branding is unavailable.
+type Branding = {
+  companyName?: string | null;
+  tagline?: string | null;
+  logoUrl?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  website?: string | null;
+  primaryColor?: string | null;
+  accentColor?: string | null;
+  invoiceFooter?: string | null;
+};
+
+const DEFAULTS: { companyName: string; tagline: string; primaryColor: string; accentColor: string; invoiceFooter: string } = {
+  companyName: 'FiberTrack Pro',
+  tagline: 'Fiber Construction Services',
+  primaryColor: '#1e40af',
+  accentColor: '#0891b2',
+  invoiceFooter: 'Thank you for your business',
+};
+
+function buildStyles(primary: string) {
+  return StyleSheet.create({
+    page: { padding: 40, fontSize: 10, fontFamily: 'Helvetica' },
+    header: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 30 },
+    logo: { width: 120, height: 48, objectFit: 'contain', marginBottom: 6 },
+    title: { fontSize: 24, fontWeight: 'bold', color: primary },
+    subtitle: { fontSize: 12, color: '#6b7280', marginTop: 4 },
+    companyMeta: { fontSize: 9, color: '#6b7280', marginTop: 2 },
+    section: { marginBottom: 20 },
+    sectionTitle: { fontSize: 12, fontWeight: 'bold', marginBottom: 8, color: '#1e3a5f' },
+    row: { flexDirection: 'row', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+    headerRow: { flexDirection: 'row', paddingVertical: 6, borderBottomWidth: 2, borderBottomColor: primary, backgroundColor: '#f0f4ff' },
+    col1: { width: '45%', paddingRight: 8 },
+    col2: { width: '15%', textAlign: 'right' },
+    col3: { width: '20%', textAlign: 'right' },
+    col4: { width: '20%', textAlign: 'right', fontWeight: 'bold' },
+    bold: { fontWeight: 'bold' },
+    totalsSection: { marginTop: 20, alignItems: 'flex-end' },
+    totalRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingVertical: 4 },
+    totalLabel: { width: 120, textAlign: 'right', paddingRight: 16 },
+    totalValue: { width: 100, textAlign: 'right' },
+    grandTotal: { fontSize: 14, fontWeight: 'bold', color: primary, borderTopWidth: 2, borderTopColor: primary, paddingTop: 6, marginTop: 4 },
+    footer: { position: 'absolute', bottom: 30, left: 40, right: 40, textAlign: 'center', color: '#9ca3af', fontSize: 8 },
+  });
+}
 
 function fmt(cents: number): string {
   return '$' + ((cents ?? 0) / 100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
-export function InvoicePDF({ invoice }: { invoice: any }) {
+export function InvoicePDF({ invoice, branding }: { invoice: any; branding?: Branding }) {
+  const b = branding ?? {};
+  const companyName = b.companyName || DEFAULTS.companyName;
+  const tagline = b.tagline || DEFAULTS.tagline;
+  const primary = b.primaryColor || DEFAULTS.primaryColor;
+  const footerText = b.invoiceFooter
+    ? `${companyName} — ${b.invoiceFooter}`
+    : `${companyName} — ${DEFAULTS.invoiceFooter}`;
+  const styles = buildStyles(primary);
   const pc = invoice?.primeContractor;
+
+  const companyAddress = [b.address, [b.city, b.state, b.zip].filter(Boolean).join(', ')]
+    .filter(Boolean)
+    .join(', ');
+
   return (
     <Document>
       <Page size="A4" style={styles.page}>
         <View style={styles.header}>
           <View>
-            <Text style={styles.title}>FiberTrack Pro</Text>
-            <Text style={styles.subtitle}>Fiber Construction Services</Text>
+            {b.logoUrl ? (
+              // eslint-disable-next-line jsx-a11y/alt-text
+              <Image src={b.logoUrl} style={styles.logo} />
+            ) : null}
+            <Text style={styles.title}>{companyName}</Text>
+            <Text style={styles.subtitle}>{tagline}</Text>
+            {companyAddress ? <Text style={styles.companyMeta}>{companyAddress}</Text> : null}
+            {(b.phone || b.email) ? (
+              <Text style={styles.companyMeta}>{[b.phone, b.email].filter(Boolean).join('  •  ')}</Text>
+            ) : null}
+            {b.website ? <Text style={styles.companyMeta}>{b.website}</Text> : null}
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={{ fontSize: 18, fontWeight: 'bold' }}>INVOICE</Text>
-            <Text style={{ fontSize: 12, color: '#1e40af', marginTop: 4 }}>{invoice?.invoiceNumber ?? ''}</Text>
+            <Text style={{ fontSize: 12, color: primary, marginTop: 4 }}>{invoice?.invoiceNumber ?? ''}</Text>
             <Text style={{ color: '#6b7280', marginTop: 4 }}>Date: {new Date(invoice?.createdAt).toLocaleDateString('en-US', { timeZone: 'UTC' })}</Text>
           </View>
         </View>
@@ -98,7 +148,7 @@ export function InvoicePDF({ invoice }: { invoice: any }) {
           </View>
         ) : null}
 
-        <Text style={styles.footer}>FiberTrack Pro - Thank you for your business</Text>
+        <Text style={styles.footer}>{footerText}</Text>
       </Page>
     </Document>
   );

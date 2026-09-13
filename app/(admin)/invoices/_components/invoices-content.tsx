@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { FileText, Plus, Download } from 'lucide-react';
+import { FileText, Plus, Download, Mail, Send, Loader2 } from 'lucide-react';
 import { StatusBadge } from '@/components/status-badge';
 import { formatCents, formatDate } from '@/lib/utils/format';
 import Link from 'next/link';
@@ -24,6 +24,9 @@ export function InvoicesContent() {
   const [selectedContractor, setSelectedContractor] = useState('');
   const [selectedJobs, setSelectedJobs] = useState<string[]>([]);
   const [taxRate, setTaxRate] = useState('0');
+  const [sendTarget, setSendTarget] = useState<any | null>(null);
+  const [sendTo, setSendTo] = useState('');
+  const [sending, setSending] = useState(false);
 
   const fetchData = () => {
     Promise.all([
@@ -64,6 +67,32 @@ export function InvoicesContent() {
       toast.success(`Invoice marked as ${status.toLowerCase()}`);
       fetchData();
     } catch { toast.error('Failed to update'); }
+  };
+
+  const openSend = (inv: any) => {
+    setSendTarget(inv);
+    setSendTo(inv?.primeContractor?.email ?? '');
+  };
+
+  const handleSend = async () => {
+    if (!sendTarget) return;
+    setSending(true);
+    try {
+      const res = await fetch(`/api/invoices/${sendTarget.id}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: sendTo || undefined }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data?.error ?? 'Failed to send');
+      toast.success(sendTarget?.emailCount > 0 ? 'Invoice resent' : 'Invoice sent');
+      setSendTarget(null);
+      fetchData();
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Failed to send invoice');
+    } finally {
+      setSending(false);
+    }
   };
 
   const handleDownloadPdf = (id: string) => {
@@ -142,8 +171,10 @@ export function InvoicesContent() {
                   <TableCell><StatusBadge status={inv?.status} /></TableCell>
                   <TableCell>
                     <div className="flex gap-1">
-                      <Button variant="ghost" size="icon-sm" onClick={() => handleDownloadPdf(inv?.id)}><Download className="w-4 h-4" /></Button>
-                      {inv?.status === 'DRAFT' && <Button variant="ghost" size="sm" onClick={() => handleStatusChange(inv?.id, 'SENT')}>Mark Sent</Button>}
+                      <Button variant="ghost" size="icon-sm" title="Download PDF" onClick={() => handleDownloadPdf(inv?.id)}><Download className="w-4 h-4" /></Button>
+                      <Button variant="ghost" size="sm" onClick={() => openSend(inv)}>
+                        {inv?.emailCount > 0 ? <><Mail className="w-4 h-4 mr-1" />Resend</> : <><Send className="w-4 h-4 mr-1" />Send</>}
+                      </Button>
                       {inv?.status === 'SENT' && <Button variant="ghost" size="sm" onClick={() => handleStatusChange(inv?.id, 'PAID')}>Mark Paid</Button>}
                     </div>
                   </TableCell>
@@ -153,6 +184,20 @@ export function InvoicesContent() {
           </Table>
         </CardContent>
       </Card>
+
+      <Dialog open={!!sendTarget} onOpenChange={(o: boolean) => !o && setSendTarget(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{sendTarget?.emailCount > 0 ? 'Resend' : 'Send'} Invoice {sendTarget?.invoiceNumber ?? ''}</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">A branded PDF of this invoice will be emailed to the recipient below using the configured email settings.</p>
+            <div><Label>Recipient Email</Label><Input type="email" value={sendTo} placeholder="contractor@example.com" onChange={(e: any) => setSendTo(e.target.value)} /></div>
+            {sendTarget?.emailCount > 0 && <p className="text-xs text-muted-foreground">This invoice was emailed {sendTarget?.emailCount} time(s) already. A reminder template will be used.</p>}
+            <Button onClick={handleSend} disabled={sending} className="w-full">
+              {sending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}{sendTarget?.emailCount > 0 ? 'Resend Invoice' : 'Send Invoice'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

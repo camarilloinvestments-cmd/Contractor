@@ -4,6 +4,7 @@ import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from '@/components/ui/sonner';
 import { ChunkLoadErrorHandler } from '@/components/chunk-load-error-handler';
 import { Providers } from '@/components/providers';
+import { getCompanyProfile } from '@/lib/branding';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,18 +12,21 @@ const dmSans = DM_Sans({ subsets: ['latin'], variable: '--font-sans' });
 const jakartaSans = Plus_Jakarta_Sans({ subsets: ['latin'], variable: '--font-display' });
 const jetbrainsMono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono' });
 
-export const metadata = {
-  title: 'FiberTrack Pro',
-  description: 'Contractor billing and job management for fiber construction',
-  metadataBase: new URL(process.env.NEXTAUTH_URL || 'http://localhost:3000'),
-  icons: {
-    icon: '/favicon.svg',
-    shortcut: '/favicon.svg',
-  },
-  openGraph: {
-    images: ['/og-image.png'],
-  },
-};
+export async function generateMetadata() {
+  const branding = await getCompanyProfile();
+  return {
+    title: branding.companyName,
+    description: branding.tagline || 'Contractor billing and job management for fiber construction',
+    metadataBase: new URL(process.env.NEXTAUTH_URL || 'http://localhost:3000'),
+    icons: {
+      icon: '/favicon.svg',
+      shortcut: '/favicon.svg',
+    },
+    openGraph: {
+      images: ['/og-image.png'],
+    },
+  };
+}
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

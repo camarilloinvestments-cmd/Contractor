@@ -58,6 +58,12 @@ enum WorkerType {
   IN_HOUSE
 }
 
+enum EmailStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
 model User {
   id             String    @id @default(cuid())
   email          String    @unique
@@ -272,6 +278,8 @@ model Invoice {
   total             Int             @default(0) // cents
   status            InvoiceStatus   @default(DRAFT)
   notes             String?
+  lastEmailedAt     DateTime?
+  emailCount        Int             @default(0)
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
   primeContractor   PrimeContractor @relation(fields: [primeContractorId], references: [id])
@@ -306,4 +314,113 @@ model PayoutRecord {
 
   @@index([workerId])
   @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1 (v1.1.0) foundations: branding, email, email templates/logs, audit.
+// All tables are additive; no existing model semantics change.
+// ---------------------------------------------------------------------------
+
+// Single-company branding / white-label profile (singleton row id = "default").
+// Multi-tenant branding is intentionally deferred; this model can later gain a
+// tenantId without altering existing columns.
+model CompanyProfile {
+  id            String   @id @default("default")
+  companyName   String   @default("FiberTrack Pro")
+  legalName     String?
+  tagline       String?  @default("Fiber Construction Services")
+  logoUrl       String?
+  address       String?
+  city          String?
+  state         String?
+  zip           String?
+  phone         String?
+  email         String?
+  website       String?
+  supportEmail  String?
+  supportPhone  String?
+  primaryColor  String   @default("#1e40af")
+  accentColor   String   @default("#0891b2")
+  invoicePrefix String?  @default("INV")
+  invoiceFooter String?  @default("Thank you for your business")
+  portalUrl     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// SMTP / email provider configuration (singleton row id = "default").
+// The SMTP password is stored ONLY as AES-256-GCM ciphertext produced with
+// APP_ENCRYPTION_KEY. There is no plaintext fallback; if the key is missing or
+// wrong, decryption fails closed and email sending is disabled.
+model EmailSettings {
+  id                String   @id @default("default")
+  enabled           Boolean  @default(false)
+  host              String?
+  port              Int?     @default(587)
+  secure            Boolean  @default(false)
+  username          String?
+  passwordEncrypted String?
+  fromName          String?
+  fromEmail         String?
+  replyTo           String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+// Editable email templates. Bodies use an allow-listed {{variable}} syntax only;
+// no arbitrary code execution is possible during rendering.
+model EmailTemplate {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  name      String
+  subject   String
+  bodyHtml  String
+  bodyText  String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Delivery log for every outbound email attempt.
+model EmailLog {
+  id          String      @id @default(cuid())
+  toAddress   String
+  ccAddress   String?
+  subject     String
+  templateKey String?
+  status      EmailStatus @default(QUEUED)
+  error       String?
+  provider    String?
+  messageId   String?
+  relatedType String?
+  relatedId   String?
+  sentById    String?
+  createdAt   DateTime    @default(now())
+  sentAt      DateTime?
+
+  @@index([relatedType, relatedId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// General-purpose audit trail for privileged/config actions (branding, email
+// settings, invoice sends, etc.). Distinct from ActivityLog, which records field
+// work (photos, notes, GPS). Expanded in Phase 2 for user lifecycle & MFA.
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actorEmail String?
+  actorRole  String?
+  action     String
+  entityType String?
+  entityId   String?
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([createdAt])
 }
