@@ -18,6 +18,7 @@ export type SendEmailInput = {
   subject: string;
   html: string;
   text?: string;
+  bcc?: string | null;
   templateKey?: string | null;
   relatedType?: string | null;
   relatedId?: string | null;
@@ -28,6 +29,7 @@ export type SendEmailInput = {
 export type SendEmailResult = {
   ok: boolean;
   messageId?: string;
+  provider?: string; // active provider preset key (for send evidence)
   error?: string; // safe, categorized, operator-facing message
   errorCategory?: string;
   logId?: string;
@@ -91,6 +93,7 @@ export async function verifyTransport(): Promise<{ ok: boolean; error?: string; 
 export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
   // Create the log row up-front in QUEUED state.
   let logId: string | undefined;
+  let activeProvider: string | undefined;
   try {
     const log = await prisma.emailLog.create({
       data: {
@@ -111,11 +114,13 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
 
   try {
     const { transport, settings } = await buildTransport();
+    activeProvider = settings.provider || 'smtp';
     const fromName = settings.fromName || 'OS1 Fiber Track Pro';
     const info = (await transport.sendMail({
       from: `"${fromName}" <${settings.fromEmail}>`,
       to: input.to,
       cc: input.cc ?? undefined,
+      bcc: input.bcc ?? undefined,
       replyTo: settings.replyTo ?? undefined,
       subject: input.subject,
       html: input.html,
@@ -134,7 +139,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
         },
       });
     }
-    return { ok: true, messageId: info.messageId, logId };
+    return { ok: true, messageId: info.messageId, provider: activeProvider, logId };
   } catch (err) {
     // Store the categorized, safe message. The raw message may contain sensitive
     // details, so it is intentionally NOT persisted or returned to callers.
@@ -144,6 +149,6 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
         .update({ where: { id: logId }, data: { status: 'FAILED', error: cat.message } })
         .catch(() => undefined);
     }
-    return { ok: false, error: cat.message, errorCategory: cat.category, logId };
+    return { ok: false, error: cat.message, errorCategory: cat.category, provider: activeProvider, logId };
   }
 }
