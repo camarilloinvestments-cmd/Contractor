@@ -4,6 +4,7 @@ import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { resolveWorkOrderPin } from '@/lib/work-orders';
 import { writeAudit, requestMeta } from '@/lib/audit';
+import { createWithNumber } from '@/lib/documents/numbering';
 
 function canManage(role?: string | null) {
   return role === 'ADMIN' || role === 'PROJECT_MANAGER';
@@ -72,12 +73,11 @@ export async function POST(request: Request) {
       overrideVersionId: body.priceBookVersionId ?? body.overrideVersionId ?? null,
     });
 
-    const count = await prisma.job.count();
-    const jobNumber = `WO-${String(count + 1).padStart(5, '0')}`;
-
     // Explicit allow-list (no mass assignment): only these client fields are
-    // honored; pin + jobNumber are server-controlled.
-    const job = await prisma.job.create({
+    // honored; pin + jobNumber are server-controlled. Work-order numbers are
+    // allocated from the shared, concurrency-safe DocumentCounter (WO-xxxxx),
+    // never count+1.
+    const job = await createWithNumber('WORKORDER', (jobNumber) => prisma.job.create({
       data: {
         jobNumber,
         jobName: body.jobName,
@@ -100,7 +100,7 @@ export async function POST(request: Request) {
         commissionPlanId: body.commissionPlanId ?? null,
         geofenceRadiusFeet: typeof body.geofenceRadiusFeet === 'number' ? body.geofenceRadiusFeet : null,
       },
-    });
+    }));
     await writeAudit({
       actor: { id: session.user.id, email: session.user.email, role: session.user.role },
       action: 'work_order.create', entityType: 'Job', entityId: job.id,

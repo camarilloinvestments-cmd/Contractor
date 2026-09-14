@@ -203,3 +203,17 @@ INSERT INTO "DocumentCounter" ("key","prefix","value","padding","updatedAt") VAL
   ('INVOICE','INV',0,5,CURRENT_TIMESTAMP),
   ('WORKORDER','WO',0,5,CURRENT_TIMESTAMP)
 ON CONFLICT ("key") DO NOTHING;
+
+-- Sync counters to the highest existing numeric suffix so counter-allocated
+-- numbers never collide with records created before this migration (e.g. legacy
+-- WO-xxxxx work orders and INV-xxxx invoices produced by the old count+1 logic).
+-- GREATEST keeps this idempotent: re-running never lowers a counter.
+UPDATE "DocumentCounter" c SET "value" = GREATEST(c."value", COALESCE((
+  SELECT MAX(CAST(substring(j."jobNumber" from '([0-9]+)$') AS INTEGER))
+  FROM "Job" j WHERE j."jobNumber" ~ '^WO-[0-9]+$'
+), 0)) WHERE c."key" = 'WORKORDER';
+
+UPDATE "DocumentCounter" c SET "value" = GREATEST(c."value", COALESCE((
+  SELECT MAX(CAST(substring(i."invoiceNumber" from '([0-9]+)$') AS INTEGER))
+  FROM "Invoice" i WHERE i."invoiceNumber" ~ '^INV-[0-9]+$'
+), 0)) WHERE c."key" = 'INVOICE';
