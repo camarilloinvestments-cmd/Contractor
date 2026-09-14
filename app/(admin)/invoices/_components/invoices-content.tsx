@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { FileText, Plus, Download, Mail, Send, Loader2 } from 'lucide-react';
+import { FileText, Plus, Download, Mail, Send, Loader2, Eye } from 'lucide-react';
 import { StatusBadge } from '@/components/status-badge';
 import { formatCents, formatDate } from '@/lib/utils/format';
 import Link from 'next/link';
@@ -171,6 +171,7 @@ export function InvoicesContent() {
                   <TableCell><StatusBadge status={inv?.status} /></TableCell>
                   <TableCell>
                     <div className="flex gap-1">
+                      <Button variant="ghost" size="icon-sm" title="Preview" onClick={() => window.open(`/invoices/${inv?.id}/preview`, '_blank')}><Eye className="w-4 h-4" /></Button>
                       <Button variant="ghost" size="icon-sm" title="Download PDF" onClick={() => handleDownloadPdf(inv?.id)}><Download className="w-4 h-4" /></Button>
                       <Button variant="ghost" size="sm" onClick={() => openSend(inv)}>
                         {inv?.emailCount > 0 ? <><Mail className="w-4 h-4 mr-1" />Resend</> : <><Send className="w-4 h-4 mr-1" />Send</>}

@@ -6,6 +6,7 @@ import { renderToBuffer } from '@react-pdf/renderer';
 import React from 'react';
 import { InvoicePDF } from '@/components/invoice-pdf';
 import { getCompanyProfile } from '@/lib/branding';
+import { resolveBrandingForPdf } from '@/lib/documents/pdf';
 import { getTemplate, TEMPLATE_KEYS } from '@/lib/email/templates';
 import { renderTemplate } from '@/lib/email/render';
 import { companyVariables, invoiceVariables, mergeVariables } from '@/lib/email/variables';
@@ -44,9 +45,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const branding = await getCompanyProfile();
 
-    // Branded PDF attachment.
+    // Branded PDF attachment — use the shared resolver so the emailed PDF
+    // carries the logo inlined as a data URI (works in local-storage mode too).
+    const brandingForPdf = await resolveBrandingForPdf();
     const pdfBuffer = await renderToBuffer(
-      React.createElement(InvoicePDF, { invoice: invoice as any, branding: branding as any }) as any
+      React.createElement(InvoicePDF, { invoice: invoice as any, branding: brandingForPdf as any }) as any
     );
 
     // Choose reminder vs new based on whether it was already emailed (or override).

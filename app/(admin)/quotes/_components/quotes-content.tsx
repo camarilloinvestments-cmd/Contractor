@@ -83,7 +83,7 @@ export function QuotesContent() {
     } catch (err: any) { toast.error(err?.message ?? 'Failed to create quote'); } finally { setSaving(false); }
   };
 
-  const openPreview = (id: string) => window.open(`/api/quotes/${id}/preview`, '_blank');
+  const openPreview = (id: string) => window.open(`/quotes/${id}/preview`, '_blank');
   const downloadPdf = (id: string, num: string) => {
     const a = document.createElement('a');
     a.href = `/api/quotes/${id}/pdf`; a.download = `${num || 'quote'}.pdf`; a.click();

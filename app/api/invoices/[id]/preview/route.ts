@@ -43,5 +43,20 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     });
   }
 
-  return NextResponse.json({ snapshot });
+  const branding = await getCompanyProfile();
+  return NextResponse.json({
+    snapshot,
+    branding: {
+      companyName: branding.companyName,
+      logoUrl: branding.logoUrl,
+      address: branding.address,
+      city: branding.city,
+      state: branding.state,
+      zip: branding.zip,
+      phone: branding.phone,
+      email: branding.email,
+      website: branding.website,
+      primaryColor: branding.primaryColor,
+    },
+  });
 }

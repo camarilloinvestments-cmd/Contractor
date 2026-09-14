@@ -75,7 +75,7 @@ export function EstimatesContent() {
     } catch (err: any) { toast.error(err?.message ?? 'Failed to create estimate'); } finally { setSaving(false); }
   };
 
-  const openPreview = (id: string) => window.open(`/api/estimates/${id}/preview`, '_blank');
+  const openPreview = (id: string) => window.open(`/estimates/${id}/preview`, '_blank');
   const downloadPdf = (id: string, num: string) => {
     const a = document.createElement('a');
     a.href = `/api/estimates/${id}/pdf`; a.download = `${num || 'estimate'}.pdf`; a.click();

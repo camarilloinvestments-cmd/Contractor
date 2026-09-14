@@ -5,7 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { renderToBuffer } from '@react-pdf/renderer';
 import React from 'react';
 import { InvoicePDF } from '@/components/invoice-pdf';
-import { getCompanyProfile, getBrandingLogoBytes } from '@/lib/branding';
+import { resolveBrandingForPdf } from '@/lib/documents/pdf';
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -22,16 +22,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     });
     if (!invoice) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-    const branding = await getCompanyProfile();
-    // Resolve the logo to a data URI so it renders regardless of backend
-    // (S3 public URL or local-storage fallback served via /api/branding/logo).
-    // react-pdf's <Image> cannot fetch relative URLs or render SVG, so only
-    // raster logos are inlined; SVG keeps the original URL.
-    const logo = await getBrandingLogoBytes(branding);
-    const brandingForPdf: any = { ...branding };
-    if (logo && logo.ext !== 'svg') {
-      brandingForPdf.logoUrl = `data:${logo.contentType};base64,${logo.buffer.toString('base64')}`;
-    }
+    // Shared resolver inlines the logo as a data URI so it renders regardless
+    // of backend (S3 public URL or local-storage fallback).
+    const brandingForPdf = await resolveBrandingForPdf();
     const buffer = await renderToBuffer(
       React.createElement(InvoicePDF, { invoice: invoice as any, branding: brandingForPdf }) as any
     );
