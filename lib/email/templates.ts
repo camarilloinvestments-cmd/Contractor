@@ -17,6 +17,9 @@ export type DefaultTemplate = {
 export const TEMPLATE_KEYS = {
   INVOICE_NEW: 'invoice_new',
   INVOICE_REMINDER: 'invoice_reminder',
+  ESTIMATE_NEW: 'estimate_new',
+  QUOTE_NEW: 'quote_new',
+  QUOTE_ACCEPTED: 'quote_accepted',
   TEST: 'test_email',
 } as const;
 
@@ -58,6 +61,64 @@ This is a friendly reminder that invoice {{invoice_number}} for {{invoice_total}
 Outstanding balance: {{invoice_balance}}
 
 Questions? Reach us at {{support_email}} or {{support_phone}}.
+
+{{company_name}}`,
+  },
+  {
+    key: TEMPLATE_KEYS.ESTIMATE_NEW,
+    name: 'New Estimate',
+    subject: 'Estimate {{estimate_number}} from {{company_name}}',
+    bodyHtml: `<p>Dear {{contact_name}},</p>
+<p>Please find attached estimate <strong>{{estimate_number}}</strong> dated {{issue_date}} for project {{project_name}}.</p>
+<p>Estimated total: <strong>{{estimate_total}}</strong></p>
+<p>This estimate is valid until {{expiration_date}}. If you have any questions, contact us at {{support_email}} or {{support_phone}}.</p>
+<p>Thank you,<br/>{{company_name}}<br/>{{company_website}}</p>`,
+    bodyText: `Dear {{contact_name}},
+
+Please find attached estimate {{estimate_number}} dated {{issue_date}} for project {{project_name}}.
+
+Estimated total: {{estimate_total}}
+
+This estimate is valid until {{expiration_date}}. If you have any questions, contact us at {{support_email}} or {{support_phone}}.
+
+Thank you,
+{{company_name}}
+{{company_website}}`,
+  },
+  {
+    key: TEMPLATE_KEYS.QUOTE_NEW,
+    name: 'New Quote',
+    subject: 'Quote {{quote_number}} from {{company_name}}',
+    bodyHtml: `<p>Dear {{contact_name}},</p>
+<p>Please find attached quote <strong>{{quote_number}}</strong> dated {{issue_date}} for project {{project_name}}.</p>
+<p>Quote total: <strong>{{quote_total}}</strong></p>
+<p>This quote is valid until {{expiration_date}}. To review or accept, contact us at {{support_email}} or {{support_phone}}.</p>
+<p>Thank you,<br/>{{company_name}}<br/>{{company_website}}</p>`,
+    bodyText: `Dear {{contact_name}},
+
+Please find attached quote {{quote_number}} dated {{issue_date}} for project {{project_name}}.
+
+Quote total: {{quote_total}}
+
+This quote is valid until {{expiration_date}}. To review or accept, contact us at {{support_email}} or {{support_phone}}.
+
+Thank you,
+{{company_name}}
+{{company_website}}`,
+  },
+  {
+    key: TEMPLATE_KEYS.QUOTE_ACCEPTED,
+    name: 'Quote Accepted',
+    subject: 'Quote {{quote_number}} accepted — {{company_name}}',
+    bodyHtml: `<p>Dear {{contact_name}},</p>
+<p>Thank you — quote <strong>{{quote_number}}</strong> for {{quote_total}} has been accepted.</p>
+<p>We will proceed with the next steps for project {{project_name}}. Questions? Reach us at {{support_email}} or {{support_phone}}.</p>
+<p>{{company_name}}</p>`,
+    bodyText: `Dear {{contact_name}},
+
+Thank you — quote {{quote_number}} for {{quote_total}} has been accepted.
+
+We will proceed with the next steps for project {{project_name}}. Questions? Reach us at {{support_email}} or {{support_phone}}.
 
 {{company_name}}`,
   },
