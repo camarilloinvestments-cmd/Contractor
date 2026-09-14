@@ -219,6 +219,45 @@ preserved, new tables created empty, zero schema drift).
   (singleton) and `UpdateHistory`. All additive — no destructive change; zero
   schema drift verified.
 
+### Workstreams P/Q/R & V — Mobile foundation, offline sync, field evidence & branding regression (this increment)
+
+#### Mobile app foundation (P)
+- Server-authoritative mobile API under `/api/mobile/*`. Per-user, per-device
+  bearer sessions (`os1_mob_` tokens; only the SHA-256 hash is stored, plaintext
+  returned once). 30-day session TTL, MFA-compatible login.
+- Endpoints: `auth/login`, `auth/logout`, `me`, `jobs`, `tasks`,
+  `tasks/{id}/status`, `payouts`. Field workers are scoped to their own
+  assignments; the device never sends rates — the server recomputes billable /
+  cost / profit from each task's stored rates.
+- Admin device management: `GET /api/system/devices` (inventory + live sessions),
+  `POST /api/system/devices/{id}/revoke` (kills device + all its sessions).
+- Architecture documented in `docs/MOBILE.md` (React Native + Expo target).
+
+#### Offline sync (Q)
+- `POST /api/mobile/sync` flushes the device's offline queue (<=500 records) into
+  an idempotent ledger (`MobileSyncEvent`), keyed by `idempotencyKey` and
+  `[deviceId, localUuid]`. Replays return `DUPLICATE` acks. Last-write-wins
+  conflict detection via `detectConflict` (`server_newer`).
+
+#### Field Evidence Package (R)
+- `POST /api/mobile/evidence` — idempotent by `localUuid`; evaluates the job
+  geofence (`INSIDE`/`OUTSIDE`/`UNKNOWN`/`NO_GEOFENCE` — GPS mandatory but
+  flagged, never rejected), stores photos/documents as `EvidenceAsset` rows,
+  captures signature + production. `GET /api/mobile/evidence` (worker's own) and
+  `GET /api/evidence` (ADMIN/PM review list with filters).
+
+#### Branding regression (V)
+- Invoice PDF logo enlarged to 150x60 (`objectFit: contain`) for crisper
+  letterhead. Sidebar brand mark verified. SMTP, email templates/logs, invoice
+  email send/resend, `APP_ENCRYPTION_KEY` handling and audit logging verified at
+  code level (unchanged from v1.1.0).
+
+#### Database & migrations (P/Q/R)
+- Additive migration `0011_mobile_evidence_sync`. New enums `DevicePlatform`,
+  `DeviceStatus`, `SyncEntityType`, `SyncResult`, `GeofenceStatus`,
+  `EvidenceKind`, `EvidenceStatus`; new tables `MobileDevice`, `MobileSession`,
+  `MobileSyncEvent`, `FieldEvidencePackage`, `EvidenceAsset`. All additive —
+  zero schema drift verified against a fresh migrate-deploy.
 ---
 ---
 
