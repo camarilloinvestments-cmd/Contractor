@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
 import { writeAudit, requestMeta } from '@/lib/audit';
 import { countOtherActiveAdmins, generateTempPassword } from '@/lib/users/admin-ops';
+import { revokeAllUserDevices } from '@/lib/mobile/auth';
 
 // POST /api/users/:id/actions  { action, ...args }
 // Lifecycle actions: deactivate, reactivate, unlock, reset-password,
@@ -41,6 +42,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           where: { id },
           data: { status: 'DEACTIVATED', deactivatedAt: new Date(), tokenVersion: { increment: 1 } },
         });
+        // Section F: deactivation must revoke mobile devices/sessions too.
+        await revokeAllUserDevices(id, session.user.id);
         await audit('user.deactivate', { email: target.email });
         return NextResponse.json({ ok: true });
       }
@@ -55,6 +58,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       }
       case 'revoke-sessions': {
         await prisma.user.update({ where: { id }, data: { tokenVersion: { increment: 1 } } });
+        await revokeAllUserDevices(id, session.user.id);
         await audit('user.revoke_sessions', { email: target.email });
         return NextResponse.json({ ok: true });
       }
@@ -84,6 +88,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             tokenVersion: { increment: 1 }, // invalidate existing sessions after reset
           },
         });
+        // Section F: a password reset must invalidate mobile authorization too.
+        await revokeAllUserDevices(id, session.user.id);
         // Never log the password itself; only that a reset happened + whether generated.
         await audit('user.reset_password', { email: target.email, generated: !provided, forceChange });
         return NextResponse.json({ ok: true, generatedPassword: generated ?? undefined });
@@ -103,6 +109,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             tokenVersion: { increment: 1 },
           },
         });
+        // Section F: an MFA/security reset must invalidate mobile authorization too.
+        await revokeAllUserDevices(id, session.user.id);
         await audit('mfa.reset', { email: target.email });
         return NextResponse.json({ ok: true });
       }

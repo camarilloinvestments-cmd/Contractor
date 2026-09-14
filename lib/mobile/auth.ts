@@ -56,6 +56,9 @@ export async function verifyMobileSession(
   if (!session || session.revokedAt) return { ok: false, status: 401, error: 'Invalid or revoked session.' };
   if (session.expiresAt.getTime() < Date.now()) return { ok: false, status: 401, error: 'Session expired.' };
   if (!session.device || session.device.status !== 'ACTIVE') return { ok: false, status: 401, error: 'Device revoked.' };
+  // Section F: the user must still exist and be ACTIVE. A deactivated/off-boarded
+  // account must immediately lose mobile authorization even on a live session.
+  if (!session.user || session.user.status !== 'ACTIVE') return { ok: false, status: 401, error: 'Account deactivated.' };
 
   const now = new Date();
   await prisma.mobileSession.update({ where: { id: session.id }, data: { lastUsedAt: now } });
