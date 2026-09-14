@@ -316,7 +316,110 @@ function runUpgrade(args: string[]) {
     noSecretInline && rr.length > 0);
 }
 
+// ===========================================================================
+// First-upgrade QUIESCE guarantees (stop the old, non-gate-aware app before any
+// DB mutation). Checks 30-40 map to the 11 quiesce acceptance points.
+// ===========================================================================
+const iBuild = upgrade.indexOf('Build candidate image');
+const iQuiesce = upgrade.indexOf('Quiesce running application');
+const iStopApp = upgrade.indexOf('$COMPOSE stop app');
+const iMigrate = upgrade.indexOf('Apply migrations from candidate image');
+const iMaintOn = upgrade.indexOf('Enter maintenance mode');
+const iCutover = upgrade.indexOf('Cutover to candidate');
+const i15b = upgrade.indexOf('15b.', iMigrate);
+const migFailBranch = iMigrate > -1 && i15b > -1 ? upgrade.slice(iMigrate, i15b) : '';
+const quiesceBlock = iQuiesce > -1 && iMigrate > -1 ? upgrade.slice(iQuiesce, iMigrate) : '';
+
+// 30 (accept 1): candidate build precedes quiesce, so the build runs while the
+// old app is still ONLINE (build < maintenance-on < quiesce/stop).
+ok(30, 'Pre-maintenance candidate build leaves the old app online (build precedes quiesce/stop)',
+  iBuild > -1 && iQuiesce > iBuild && iMaintOn > iBuild && iStopApp > iBuild,
+  `build=${iBuild} maintOn=${iMaintOn} quiesce=${iQuiesce} stopApp=${iStopApp}`);
+
+// 31 (accept 2): the old app is stopped BEFORE migrations.
+ok(31, 'Old app is stopped BEFORE migration (stop app precedes migrate)',
+  iStopApp > -1 && iMigrate > -1 && iStopApp < iMigrate, `stopApp=${iStopApp} migrate=${iMigrate}`);
+
+// 32 (accept 3): only the app service is stopped; PostgreSQL is left running and
+// is never stopped anywhere in the script.
+{
+  const stopsDb = /\$COMPOSE\s+stop\s+(db|postgres|postgresql)\b/.test(upgrade) ||
+    /\$COMPOSE\s+stop\s+app\s+db\b/.test(upgrade);
+  const leavesDbUp = /PostgreSQL (?:left running|untouched)/.test(quiesceBlock);
+  ok(32, 'DB stays running during quiesce (only app is stopped; db never stopped)',
+    !stopsDb && leavesDbUp, `stopsDb=${stopsDb} leavesDbUp=${leavesDbUp}`);
+}
+
+// 33 (accept 4): a stop failure STOPS the run before migrating (|| die).
+ok(33, 'Stop failure prevents migration ($COMPOSE stop app || die, refusing to migrate)',
+  /\$COMPOSE stop app[\s\S]{0,120}\|\| die "could not stop the running application before migration/.test(upgrade));
+
+// 34 (accept 5): a migration failure leaves the old app stopped (no restart of
+// the old app in the migration-failure branch; APP_STOPPED already =1).
+{
+  // Executed (non-echo) lines only: recovery *instructions* may mention how an
+  // operator would later restart the prior app, but no command line may do so.
+  const execOnly = migFailBranch.split('\n').filter((l) => !/^\s*echo\b/.test(l)).join('\n');
+  const noRestart = !/\$COMPOSE (up|start) /.test(execOnly);
+  const keptStopped = /old app(?:lication)? (?:kept stopped|remains STOPPED)/i.test(migFailBranch);
+  ok(34, 'Failed migration leaves the old app stopped (no auto-restart of old image; recovery guidance excluded)',
+    noRestart && keptStopped, `noRestart=${noRestart} keptStopped=${keptStopped}`);
+}
+
+// 35 (accept 6): a migration failure leaves maintenance ON (die never disables
+// it; branch explicitly states maintenance held/remains ON).
+{
+  const disablesMaint = /run_maintenance off/.test(migFailBranch);
+  const heldOn = /maintenance (?:held|remains) ON/i.test(migFailBranch);
+  ok(35, 'Failed migration leaves maintenance ON', !disablesMaint && heldOn,
+    `disablesMaint=${disablesMaint} heldOn=${heldOn}`);
+}
+
+// 36 (accept 7): candidate starts only AFTER a successful migration (cutover
+// up -d is after the migrate step, which dies on failure).
+ok(36, 'Candidate starts only after successful migration (cutover follows migrate)',
+  iCutover > -1 && iMigrate > -1 && iCutover > iMigrate &&
+  /\$COMPOSE up -d --no-build app/.test(upgrade.slice(iCutover)), `migrate=${iMigrate} cutover=${iCutover}`);
+
+// 37 (accept 8): previous image/container identity is captured into state and
+// persisted into history (write_state fields + recorder logs), before stop.
+{
+  const stateHasPrev = /previousContainerId/.test(upgrade) && /previousImageId/.test(upgrade) &&
+    /previousImageRef/.test(upgrade) && /previousBuildSha/.test(upgrade);
+  const capturedBeforeStop = quiesceBlock.indexOf('PREV_IMAGE_ID=') > -1 &&
+    quiesceBlock.indexOf('$COMPOSE stop app') > -1 &&
+    quiesceBlock.indexOf('PREV_IMAGE_ID=') < quiesceBlock.indexOf('$COMPOSE stop app');
+  const recorderKeepsPrev = /previousImage:\s*s\.previousImageRef/.test(recordSrc) &&
+    /previousContainerId:\s*s\.previousContainerId/.test(recordSrc);
+  ok(37, 'Previous image/container identity recorded in state + history (captured before stop)',
+    stateHasPrev && capturedBeforeStop && recorderKeepsPrev,
+    `state=${stateHasPrev} beforeStop=${capturedBeforeStop} recorder=${recorderKeepsPrev}`);
+}
+
+// 38 (accept 9): successful cutover serves the EXACT candidate image (identity
+// asserted; mismatch STOPS) - reuses the cutover identity guard.
+ok(38, 'Successful cutover serves the exact candidate image (identity mismatch STOPS)',
+  /RUNNING_IMAGE_ID" != "\$CANDIDATE_IMAGE_ID"/.test(upgrade) &&
+  /cutover did not serve the verified build/.test(upgrade));
+
+// 39 (accept 10): future upgrades stay compatible - quiesce degrades gracefully
+// when there is no running container to stop (no die; APP_STOPPED=1).
+{
+  const gracefulNoApp = /no running app container found \(nothing to quiesce\)/.test(quiesceBlock) &&
+    /no old app process to stop; PostgreSQL untouched/.test(quiesceBlock);
+  ok(39, 'Future upgrade path stays compatible (quiesce idempotent; no-running-app path never dies)',
+    gracefulNoApp);
+}
+
+// 40 (accept 11): the quiesce block and its recovery messages never print a secret.
+{
+  const secretRe = /(DATABASE_URL|PASSWORD|_SECRET|PRIVATE_KEY|APP_ENCRYPTION_KEY|GITHUB_TOKEN|GH_TOKEN)\b/i;
+  ok(40, 'Quiesce + recovery messaging never logs a secret',
+    quiesceBlock.length > 0 && !secretRe.test(quiesceBlock) && !secretRe.test(migFailBranch));
+}
+
 // ---- Live-VM items (require Docker + Postgres) ----------------------------
+liveItem(7, 'First-upgrade quiesce at runtime', 'On live VM (old pre-gate image running): the run stops the app container before migrations while PostgreSQL keeps running; docker inspect {{.State.Running}} on the old container is false before migrate, and a stop failure aborts before any migration.');
 liveItem(1, 'Cutover identity at runtime', 'On live VM w/ Docker: after cutover, `docker inspect --format {{.Image}} $(docker compose ps -q app)` MUST equal the validated candidate image id; a mismatch STOPS.');
 liveItem(2, 'Mandatory DB backup at runtime', 'On live VM w/ Postgres: confirm a non-empty gzip pg_dump (mode 600 + .sha256) exists BEFORE migrate deploy; removing the backup path aborts the run.');
 liveItem(3, 'Migrations from candidate', 'On live VM w/ Docker: `docker compose run --rm` on the candidate image runs db-bootstrap.mjs; migration failure aborts with DATABASE RESTORE REQUIRED.');

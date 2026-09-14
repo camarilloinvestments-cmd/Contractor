@@ -58,6 +58,14 @@ ROLLBACK_RESULT=""
 FAIL_STAGE=""
 FAIL_REASON=""
 MIGRATED=0
+# Identity of the CURRENTLY-running (old) application, captured BEFORE we stop it
+# so recovery knows exactly what was serving traffic. On the first upgrade into a
+# maintenance-aware release the old image does NOT enforce the DB gate, so we
+# must explicitly stop it before migrating; APP_STOPPED records whether we did.
+PREV_CONTAINER_ID=""
+PREV_IMAGE_ID=""
+PREV_IMAGE_REF=""
+APP_STOPPED=0
 # How the in-container recorder is reached. Starts "running" (best-effort against
 # the CURRENTLY running app image, which on a pre-0019 appliance may lack both the
 # recorder script and the new UpdateHistory columns). Switches to "candidate"
@@ -88,6 +96,11 @@ write_state() {
     printf '  "rollbackResult": %s,\n'   "$(json_escape "$ROLLBACK_RESULT")"
     printf '  "candidateImage": %s,\n'   "$(json_escape "$CANDIDATE_TAG")"
     printf '  "candidateDigest": %s,\n'  "$(json_escape "$CANDIDATE_IMAGE_ID")"
+    printf '  "previousContainerId": %s,\n' "$(json_escape "$PREV_CONTAINER_ID")"
+    printf '  "previousImageId": %s,\n'  "$(json_escape "$PREV_IMAGE_ID")"
+    printf '  "previousImageRef": %s,\n' "$(json_escape "$PREV_IMAGE_REF")"
+    printf '  "previousBuildSha": %s,\n' "$(json_escape "$FROM_SHA")"
+    printf '  "appStopped": %s,\n'       "$(json_escape "$APP_STOPPED")"
     printf '  "backupPath": %s,\n'       "$(json_escape "$BACKUP")"
     printf '  "securityResult": %s,\n'   "$(json_escape "$SECURITY_RESULT")"
     printf '  "failStage": %s,\n'        "$(json_escape "$FAIL_STAGE")"
@@ -376,6 +389,46 @@ mkdir -p data/updates
 touch data/updates/MAINTENANCE 2>/dev/null || true  # secondary evidence only
 echo "maintenance: ON (UpdateSettings.maintenanceMode verified ON)"
 
+# 14b. QUIESCE the currently-running (old) application BEFORE any DB mutation.
+# On the FIRST upgrade into a maintenance-aware release the old image predates
+# proxy.ts and does NOT enforce UpdateSettings.maintenanceMode, so the DB flag
+# alone cannot stop it writing during migrations. We therefore (1) capture the
+# previous container/image identity into updater state so recovery knows exactly
+# what was running, then (2) explicitly STOP the old app container, leaving
+# PostgreSQL running. If the stop cannot be confirmed we STOP and never migrate.
+step "Quiesce running application (stop old app before migration)"
+FAIL_STAGE="quiesce"
+PREV_CONTAINER_ID="$($COMPOSE ps -q app 2>/dev/null | head -n 1 || true)"
+if [ -n "$PREV_CONTAINER_ID" ]; then
+  PREV_IMAGE_ID="$(docker inspect --format '{{.Image}}' "$PREV_CONTAINER_ID" 2>/dev/null || echo unknown)"
+  PREV_IMAGE_REF="$(docker inspect --format '{{.Config.Image}}' "$PREV_CONTAINER_ID" 2>/dev/null || echo "$RUNNING_IMAGE_REF")"
+else
+  PREV_IMAGE_REF="$RUNNING_IMAGE_REF"
+  echo "note: no running app container found (nothing to quiesce)"
+fi
+echo "previous app: container=${PREV_CONTAINER_ID:-none} image=${PREV_IMAGE_ID:-unknown} ref=${PREV_IMAGE_REF} sha=${FROM_SHA}"
+# Record the previous identity into updater state/history BEFORE stopping the app
+# (best-effort: the old image may lack the recorder; the local state file always
+# captures it). Recovery reads this to know exactly what to restart.
+persist_history "IN_PROGRESS" "" || true
+if [ -n "$PREV_CONTAINER_ID" ]; then
+  # Stop ONLY the app service. PostgreSQL (db) is deliberately left running so
+  # migrations can proceed against the quiesced database.
+  $COMPOSE stop app \
+    || die "could not stop the running application before migration (STOP) — refusing to migrate; database untouched, maintenance held ON"
+  # Verify the old app is actually down; never migrate with it still up.
+  RUN_STATE="$(docker inspect --format '{{.State.Running}}' "$PREV_CONTAINER_ID" 2>/dev/null || echo gone)"
+  case "$RUN_STATE" in
+    false|gone) : ;;
+    *) die "old application still running after stop (state=${RUN_STATE}) — refusing to migrate" ;;
+  esac
+  APP_STOPPED=1
+  echo "quiesced: old app stopped; PostgreSQL left running"
+else
+  APP_STOPPED=1
+  echo "quiesced: no old app process to stop; PostgreSQL untouched"
+fi
+
 # 15. Run migrations FROM the candidate image (DB-mutating boundary)
 step "Apply migrations from candidate image"
 FAIL_STAGE="migrations"
@@ -387,7 +440,16 @@ if CONTRACTOR_APP_IMAGE="$CANDIDATE_TAG" APP_BUILD_SHA="$TARGET_SHA" \
 else
   MIGRATIONS_RESULT="FAILED"
   ROLLBACK_RESULT="DB_RESTORE_REQUIRED"
-  die "migration failed — DATABASE RESTORE REQUIRED from $BACKUP (restore before retrying)"
+  # The old app is already STOPPED and maintenance is ON — both are held so no
+  # process touches the partially-migrated DB. Never auto-restart the old image
+  # against a mutated schema. Give the operator exact recovery instructions.
+  echo "recovery: old application remains STOPPED; maintenance remains ON." >&2
+  echo "recovery: DATABASE RESTORE REQUIRED before any restart. Backup: $BACKUP" >&2
+  echo "recovery: previously-running image ref=${PREV_IMAGE_REF} id=${PREV_IMAGE_ID} sha=${FROM_SHA}" >&2
+  echo "recovery: after restoring the DB from the backup above, start the prior app with:" >&2
+  echo "recovery:   CONTRACTOR_APP_IMAGE=\"${PREV_IMAGE_REF}\" $COMPOSE up -d app" >&2
+  echo "recovery: do NOT start the candidate against a partially-migrated database." >&2
+  die "migration failed — DATABASE RESTORE REQUIRED from $BACKUP (old app kept stopped; maintenance held ON)"
 fi
 
 # 15b. Migrations 0018/0019 are now guaranteed applied and the verified candidate
@@ -403,8 +465,16 @@ persist_history "IN_PROGRESS" ""
 # 16. Cutover: point compose at the validated candidate and assert identity
 step "Cutover to candidate"
 FAIL_STAGE="cutover"
-CONTRACTOR_APP_IMAGE="$CANDIDATE_TAG" APP_BUILD_SHA="$TARGET_SHA" \
-  $COMPOSE up -d --no-build app || die "compose cutover failed"
+if ! CONTRACTOR_APP_IMAGE="$CANDIDATE_TAG" APP_BUILD_SHA="$TARGET_SHA" \
+     $COMPOSE up -d --no-build app; then
+  # Cutover failed AFTER a successful migration: the schema is already migrated,
+  # so the old image is INCOMPATIBLE and must NOT be restarted automatically.
+  echo "recovery: candidate cutover failed AFTER successful migration." >&2
+  echo "recovery: maintenance remains ON; old image is NOT restarted (schema already migrated)." >&2
+  echo "recovery: previous image ref=${PREV_IMAGE_REF} id=${PREV_IMAGE_ID} (incompatible with migrated DB)." >&2
+  echo "recovery: fix the candidate and re-run cutover; do not start the old image." >&2
+  die "compose cutover failed — recovery required (maintenance held ON; old image not restarted)"
+fi
 # Alias the validated candidate to the stable running ref so a plain
 # 'docker compose up -d' (no override) keeps serving the same validated image.
 docker tag "$CANDIDATE_TAG" "$RUNNING_IMAGE_REF"

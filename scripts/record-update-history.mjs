@@ -61,6 +61,13 @@ const logs = JSON.stringify({
   backupPath: s.backupPath || null,
   securityResult: s.securityResult || null,
   failStage: s.failStage || null,
+  // Previous (pre-upgrade) application identity so recovery knows exactly what
+  // was running before the old app was quiesced. Secret-free (image refs/ids).
+  previousImage: s.previousImageRef || null,
+  previousImageId: s.previousImageId || null,
+  previousContainerId: s.previousContainerId || null,
+  previousBuildSha: s.previousBuildSha || null,
+  appStopped: s.appStopped ?? null,
 });
 
 const message = s.failReason
