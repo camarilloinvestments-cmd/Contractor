@@ -31,7 +31,7 @@ function buildStyles(primary: string) {
   return StyleSheet.create({
     page: { padding: 40, fontSize: 10, fontFamily: 'Helvetica' },
     header: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 30 },
-    logo: { width: 120, height: 48, objectFit: 'contain', marginBottom: 6 },
+    logo: { width: 150, height: 60, objectFit: 'contain', marginBottom: 8 },
     title: { fontSize: 24, fontWeight: 'bold', color: primary },
     subtitle: { fontSize: 12, color: '#6b7280', marginTop: 4 },
     companyMeta: { fontSize: 9, color: '#6b7280', marginTop: 2 },
