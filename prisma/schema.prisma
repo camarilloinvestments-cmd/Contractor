@@ -70,6 +70,23 @@ enum EmailStatus {
   FAILED
 }
 
+enum PriceBookStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum PriceImportStatus {
+  PENDING
+  APPROVED
+  CANCELLED
+}
+
+enum RateStatus {
+  ACTIVE
+  ARCHIVED
+}
+
 model User {
   id             String    @id @default(cuid())
   email          String    @unique
@@ -164,6 +181,8 @@ model PrimeContractor {
   rateCards    PrimeContractorRate[]
   jobs         Job[]
   invoices     Invoice[]
+  priceBooks   PriceBook[]
+  priceImports PriceImport[]
 }
 
 model TaskType {
@@ -206,6 +225,7 @@ model Worker {
   tasks        Task[]
   activityLogs ActivityLog[]
   payoutRecords PayoutRecord[]
+  subcontractorRates SubcontractorRate[]
 }
 
 model WorkerRate {
@@ -459,4 +479,125 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([action])
   @@index([createdAt])
+}
+
+// -----------------------------------------------------------------------------
+// Workstreams G/H/I/J: Prime Contractor Price Books, imports, and rate books.
+// Price Book rate = WHAT THE PRIME CONTRACTOR PAYS US (billing). Never mixed
+// with subcontractor payout or in-house cost. Rates are versioned: importing new
+// rates creates a new version; historical price books/rates are never overwritten.
+// -----------------------------------------------------------------------------
+
+model PriceBook {
+  id                String          @id @default(cuid())
+  primeContractorId String
+  name              String
+  contract          String?
+  project           String?
+  market            String?
+  region            String?
+  effectiveDate     DateTime?
+  expirationDate    DateTime?
+  version           Int             @default(1)
+  status            PriceBookStatus @default(DRAFT)
+  notes             String?
+  createdById       String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  primeContractor   PrimeContractor @relation(fields: [primeContractorId], references: [id], onDelete: Cascade)
+  lines             PriceLine[]
+  imports           PriceImport[]
+
+  @@index([primeContractorId])
+  @@index([status])
+}
+
+model PriceLine {
+  id          String    @id @default(cuid())
+  priceBookId String
+  jobCode     String
+  description String
+  unit        String
+  ratePerUnit Int       // cents per unit; what the prime pays us
+  category    String?
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  priceBook   PriceBook @relation(fields: [priceBookId], references: [id], onDelete: Cascade)
+
+  @@unique([priceBookId, jobCode])
+  @@index([jobCode])
+}
+
+// A price import is an auditable record of an uploaded rate sheet. Nothing
+// becomes active until APPROVE IMPORT. Stores the original upload, original
+// values, AI-suggested mapping, final (human) mapping, approver, and timestamp.
+model PriceImport {
+  id                String            @id @default(cuid())
+  primeContractorId String
+  priceBookId       String?
+  originalFilename  String
+  storagePath       String?
+  fileType          String?
+  status            PriceImportStatus @default(PENDING)
+  usedAi            Boolean           @default(false)
+  aiMapping         Json?
+  finalMapping      Json?
+  parsedRows        Json?
+  summary           Json?
+  errorRows         Json?
+  createdById       String?
+  approvedById      String?
+  approvedAt        DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  primeContractor   PrimeContractor   @relation(fields: [primeContractorId], references: [id], onDelete: Cascade)
+  priceBook         PriceBook?        @relation(fields: [priceBookId], references: [id], onDelete: SetNull)
+
+  @@index([primeContractorId])
+  @@index([status])
+}
+
+// What WE PAY a specific subcontractor per job code. Versioned; separate from
+// prime billing rates. Different subcontractors can have different rates for the
+// same job code.
+model SubcontractorRate {
+  id             String     @id @default(cuid())
+  workerId       String
+  jobCode        String
+  description    String?
+  unit           String?
+  ratePerUnit    Int        // cents per unit; what we pay this subcontractor
+  version        Int        @default(1)
+  effectiveDate  DateTime?
+  expirationDate DateTime?
+  status         RateStatus @default(ACTIVE)
+  notes          String?
+  createdById    String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  worker         Worker     @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@index([workerId])
+  @@index([jobCode])
+}
+
+// Internal production cost for our own crews per job code. Versioned; never
+// exported to a prime contractor.
+model InHouseRate {
+  id             String     @id @default(cuid())
+  jobCode        String
+  description    String?
+  unit           String?
+  ratePerUnit    Int        // cents per unit; internal cost
+  version        Int        @default(1)
+  effectiveDate  DateTime?
+  expirationDate DateTime?
+  status         RateStatus @default(ACTIVE)
+  notes          String?
+  createdById    String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@index([jobCode])
 }

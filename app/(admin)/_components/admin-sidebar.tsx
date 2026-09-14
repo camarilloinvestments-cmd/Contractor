@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
 import {
   LayoutDashboard, Building2, Briefcase, Wrench, Users, FileText,
-  DollarSign, BarChart3, Settings, LogOut, Cable, ChevronLeft, ChevronRight, HardHat
+  DollarSign, BarChart3, Settings, LogOut, Cable, ChevronLeft, ChevronRight, HardHat, Coins
 } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
@@ -20,6 +20,10 @@ const baseNavItems = [
   { href: '/payouts', label: 'Payouts', icon: DollarSign },
   { href: '/reports', label: 'Reports', icon: BarChart3 },
   { href: '/users', label: 'Users', icon: Users },
+];
+
+const managerNavItems = [
+  { href: '/rate-books', label: 'Rate Books', icon: Coins },
 ];
 
 const adminNavItems = [
@@ -39,7 +43,12 @@ export function AdminSidebar({
 }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
-  const navItems = user?.role === 'ADMIN' ? [...baseNavItems, ...adminNavItems] : baseNavItems;
+  const isManager = user?.role === 'ADMIN' || user?.role === 'PROJECT_MANAGER';
+  const navItems = user?.role === 'ADMIN'
+    ? [...baseNavItems, ...managerNavItems, ...adminNavItems]
+    : isManager
+      ? [...baseNavItems, ...managerNavItems]
+      : baseNavItems;
 
   return (
     <aside className={cn(

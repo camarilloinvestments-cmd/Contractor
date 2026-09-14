@@ -5,6 +5,58 @@ This project uses [Semantic Versioning](https://semver.org/) (MAJOR.MINOR.PATCH)
 
 ---
 
+## v1.2.0-rc.1 — In Development (Release Candidate)
+
+Additive feature release building on the immutable v1.0.0 and v1.1.0 baselines.
+**No existing table or column has been dropped or altered destructively.** All new
+schema objects are additive and verified against the upgrade path (legacy rows
+preserved, new tables created empty, zero schema drift).
+
+> This section is a running record accumulated across development increments and
+> will be finalized when v1.2.0-rc.1 is tagged as a GitHub pre-release.
+
+### Workstreams A–F (foundation, delivered in earlier increments)
+- **A/B/C** — Product/version identity, environment & configuration hardening,
+  and role/permission groundwork.
+- **D/X** — Data-integrity and audit-trail extensions.
+- **E** — Multi-factor authentication (MFA) enrollment and enforcement policy.
+- **F** — Branding logo/image uploads via S3 presigned URLs (private, signed
+  access), reusable for KMZ/PDF branding.
+
+### Workstreams G/H/I/J — Prime price books, Excel import, AI-assist & rate books
+- **G — Prime Contractor Price Books.** New versioned price-book layer keyed on
+  string job codes (distinct from the existing `TaskType` catalog). A price book
+  has a lifecycle (`DRAFT → ACTIVE → ARCHIVED`); activating a book automatically
+  archives the prior active book of the same name. Books can be cloned to a new
+  draft version. Managed per prime at **Prime Contractors → Price Books**
+  (Admin & Project Manager).
+- **H — Excel/CSV import.** Upload a price list (`.xlsx`/`.csv`), auto-detect
+  column mapping, preview a full diff against the target book (new / unchanged /
+  increases / decreases / duplicates / rows needing fixes), download an error
+  workbook for rows that need attention, and approve to replace the draft's lines
+  in a single transaction. Downloadable import template and client-safe export.
+- **I — AI-assisted column mapping.** Optional AI suggestion of column mapping
+  (OpenAI-compatible endpoint, suggestion-only, temperature 0). Fails soft:
+  falls back to heuristic auto-detection and never blocks the import.
+- **J — Rate Books (internal cost).** New versioned **Subcontractor Rate** and
+  **In-House Rate** books keyed on job code. Saving a rate creates a new version
+  (never overwrites); jobs retain the rate active when work was recorded. Managed
+  at **Rate Books** (Admin & Project Manager). These are internal cost rates and
+  are never exposed on client-facing (prime) exports — enforced by `canManage`
+  gating on both read and write.
+
+#### Database & migrations (G/H/I/J)
+- Additive migration `0006_price_books`. New enums `PriceBookStatus`,
+  `PriceImportStatus`, `RateStatus`; new tables `PriceBook`, `PriceLine`
+  (`@@unique([priceBookId, jobCode])`), `PriceImport`, `SubcontractorRate`,
+  `InHouseRate`; new relations on `PrimeContractor` and `Worker`. All monetary
+  values stored as integer cents.
+
+#### Dependencies (G/H/I/J)
+- Added `exceljs` for spreadsheet template/import/export generation.
+
+---
+
 ## v1.1.0 — Migration Foundation, Branding & Email (2026-09-13)
 
 Additive foundation release. Builds on the immutable v1.0.0 baseline. The

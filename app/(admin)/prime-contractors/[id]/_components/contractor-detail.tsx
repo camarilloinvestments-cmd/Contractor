@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Building2, Save, Plus, Trash2, ArrowLeft } from 'lucide-react';
+import { Building2, Save, Plus, Trash2, ArrowLeft, BookOpen } from 'lucide-react';
 import { StatusBadge } from '@/components/status-badge';
 import { formatCents, dollarsToCents, formatCentsToNumber } from '@/lib/utils/format';
 import Link from 'next/link';
@@ -67,10 +67,13 @@ export function ContractorDetail({ id }: { id: string }) {
       <FadeIn>
         <div className="flex items-center gap-4">
           <Link href="/prime-contractors"><Button variant="ghost" size="icon"><ArrowLeft className="w-5 h-5" /></Button></Link>
-          <div>
+          <div className="flex-1">
             <h1 className="text-2xl font-display font-bold tracking-tight">{contractor?.companyName ?? ''}</h1>
             <p className="text-muted-foreground">Prime Contractor Details &amp; Rate Card</p>
           </div>
+          <Link href={`/prime-contractors/${id}/price-books`}>
+            <Button variant="outline"><BookOpen className="w-4 h-4 mr-2" />Price Books</Button>
+          </Link>
         </div>
       </FadeIn>
 
