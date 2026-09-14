@@ -4,6 +4,7 @@ import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from '@/components/ui/sonner';
 import { ChunkLoadErrorHandler } from '@/components/chunk-load-error-handler';
 import { Providers } from '@/components/providers';
+import { MaintenanceBanner } from '@/components/maintenance-banner';
 import { getCompanyProfile } from '@/lib/branding';
 
 export const dynamic = 'force-dynamic';
@@ -34,6 +35,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={`${dmSans.variable} ${jakartaSans.variable} ${jetbrainsMono.variable} font-sans`}>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
           <Providers>
+            <MaintenanceBanner />
             {children}
             <Toaster />
             <ChunkLoadErrorHandler />

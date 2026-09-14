@@ -137,6 +137,20 @@ persist_history() {
   fi
 }
 
+run_maintenance() {
+  # $1 = on|off|status. Toggle the AUTHORITATIVE application maintenance gate
+  # (UpdateSettings.maintenanceMode) via scripts/set-maintenance.mjs, run FROM
+  # the verified candidate image (which contains the script + Prisma client)
+  # against the SAME database. The currently-running (old) image may not contain
+  # this script and the app data dir is a NAMED volume, so we never rely on the
+  # running container. The candidate image exists from step 12 onward, which is
+  # before the first DB-mutating step (migrations), so the gate is enabled before
+  # any mutation. Prints the resulting state ('on'|'off') on stdout (last line).
+  CONTRACTOR_APP_IMAGE="$CANDIDATE_TAG" APP_BUILD_SHA="$TARGET_SHA" \
+    $COMPOSE run --rm -T --no-deps --entrypoint node app \
+      scripts/set-maintenance.mjs "$1"
+}
+
 die() {
   FAIL_REASON="$1"
   [ -n "$FAIL_STAGE" ] || FAIL_STAGE="step-${STEP}"
@@ -345,12 +359,22 @@ CANDIDATE_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$CANDIDATE_TAG")"
   || die "candidate image missing after build"
 echo "candidate image id: $CANDIDATE_IMAGE_ID"
 
-# 14. Enter maintenance mode
+# 14. Enter maintenance mode (DB-authoritative, BEFORE any DB mutation)
+# The real gate is UpdateSettings.maintenanceMode enforced by the app's request
+# proxy (503 on mutating product APIs). We enable it from the verified candidate
+# image against the live DB and VERIFY it is actually ON. If the maintenance
+# state cannot be enabled (e.g. schema too old to hold the flag) we STOP BEFORE
+# MIGRATIONS — we never enter the DB-mutating boundary without a real gate. The
+# host marker file is kept only as SECONDARY recovery evidence, never the gate.
 step "Enter maintenance mode"
 FAIL_STAGE="maintenance-on"
+MAINT_STATE="$(run_maintenance on 2>&1 | tail -n 1 | tr -d '[:space:]')" \
+  || die "could not enable DB maintenance gate before migrations (STOP): ${MAINT_STATE}"
+[ "$MAINT_STATE" = "on" ] \
+  || die "maintenance gate not confirmed ON before migrations (got '${MAINT_STATE}') — refusing to migrate"
 mkdir -p data/updates
-touch data/updates/MAINTENANCE 2>/dev/null || true
-echo "maintenance: ON"
+touch data/updates/MAINTENANCE 2>/dev/null || true  # secondary evidence only
+echo "maintenance: ON (UpdateSettings.maintenanceMode verified ON)"
 
 # 15. Run migrations FROM the candidate image (DB-mutating boundary)
 step "Apply migrations from candidate image"
@@ -410,7 +434,7 @@ else
   HEALTH_RESULT="FAILED"
   # Past the DB-mutating boundary: the old image can no longer be trusted
   # against the migrated schema. Keep maintenance ON and demand DB restore.
-  touch data/updates/MAINTENANCE 2>/dev/null || true
+  touch data/updates/MAINTENANCE 2>/dev/null || true  # secondary evidence only
   if [ "$MIGRATED" = "1" ]; then
     ROLLBACK_RESULT="DB_RESTORE_REQUIRED"
     die "health check failed after migration — DATABASE RESTORE REQUIRED from $BACKUP; maintenance held ON"
@@ -433,10 +457,17 @@ else
 fi
 
 # 19. Exit maintenance + prune old candidate images (keep last 3)
+# Reached ONLY after migrations + cutover + health + security all PASSED. Any
+# earlier failure calls die() which leaves the DB maintenance gate ON for
+# operator recovery. Turn the gate OFF and VERIFY it actually changed.
 step "Exit maintenance / prune candidates"
 FAIL_STAGE="finalize"
-rm -f data/updates/MAINTENANCE 2>/dev/null || true
-echo "maintenance: OFF"
+MAINT_STATE="$(run_maintenance off 2>&1 | tail -n 1 | tr -d '[:space:]')" \
+  || die "could not disable DB maintenance gate after successful upgrade: ${MAINT_STATE}"
+[ "$MAINT_STATE" = "off" ] \
+  || die "maintenance gate not confirmed OFF after upgrade (got '${MAINT_STATE}')"
+rm -f data/updates/MAINTENANCE 2>/dev/null || true  # secondary evidence only
+echo "maintenance: OFF (UpdateSettings.maintenanceMode verified OFF)"
 docker images 'contractor-app' --format '{{.Repository}}:{{.Tag}}' 2>/dev/null \
   | grep ':candidate-' | tail -n +4 | xargs -r docker rmi 2>/dev/null || true
 echo "prune complete"
