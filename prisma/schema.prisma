@@ -13,6 +13,7 @@ enum UserRole {
   ADMIN
   PROJECT_MANAGER
   FIELD_WORKER
+  SALES
 }
 
 enum UserStatus {
@@ -256,14 +257,21 @@ model Job {
   dueDate           DateTime?
   status            JobStatus       @default(DRAFT)
   notes             String?
+  otherDirectCosts  Int             @default(0) // cents; manual non-labor direct costs
+  salespersonId     String?
+  commissionPlanId  String?
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
   primeContractor   PrimeContractor @relation(fields: [primeContractorId], references: [id])
+  salesperson       Salesperson?    @relation(fields: [salespersonId], references: [id])
+  commissionPlan    CommissionPlan? @relation(fields: [commissionPlanId], references: [id])
+  commissionRecords CommissionRecord[]
   tasks             Task[]
   activityLogs      ActivityLog[]
 
   @@index([status])
   @@index([primeContractorId])
+  @@index([salespersonId])
 }
 
 model Task {
@@ -600,4 +608,96 @@ model InHouseRate {
   updatedAt      DateTime   @updatedAt
 
   @@index([jobCode])
+}
+
+enum SalespersonStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum CommissionPlanType {
+  PERCENT_REVENUE
+  PERCENT_GROSS_PROFIT
+  FLAT_PER_JOB
+  FLAT_PER_TASK
+  PRODUCTION_RATE
+  TIERED
+}
+
+enum CommissionEarnedEvent {
+  JOB_COMPLETED
+  JOB_APPROVED
+  INVOICE_GENERATED
+  INVOICE_PAID
+}
+
+enum CommissionPlanStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum CommissionRecordStatus {
+  PENDING
+  EARNED
+  PAID
+  VOID
+}
+
+model Salesperson {
+  id        String            @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  userId    String?           @unique
+  status    SalespersonStatus @default(ACTIVE)
+  notes     String?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  jobs      Job[]
+  commissionRecords CommissionRecord[]
+
+  @@index([status])
+}
+
+model CommissionPlan {
+  id           String                @id @default(cuid())
+  name         String
+  planType     CommissionPlanType
+  earnedEvent  CommissionEarnedEvent @default(INVOICE_PAID)
+  config       Json                  @default("{}") // rate/percent/tiers/prime & task overrides
+  status       CommissionPlanStatus  @default(ACTIVE)
+  version      Int                   @default(1)
+  notes        String?
+  createdById  String?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  jobs         Job[]
+  commissionRecords CommissionRecord[]
+
+  @@index([status])
+}
+
+model CommissionRecord {
+  id               String                 @id @default(cuid())
+  jobId            String
+  salespersonId    String
+  planId           String?
+  planName         String                 // snapshot of plan name at calc time
+  planType         CommissionPlanType     // snapshot
+  earnedEvent      CommissionEarnedEvent  // snapshot
+  rateSnapshot     Json                   @default("{}") // full plan config at calc time
+  basisAmount      Int                    @default(0) // cents (revenue or gross profit basis)
+  commissionAmount Int                    @default(0) // cents
+  status           CommissionRecordStatus @default(PENDING)
+  notes            String?
+  calculatedAt     DateTime               @default(now())
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  job              Job                    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  salesperson      Salesperson            @relation(fields: [salespersonId], references: [id])
+  plan             CommissionPlan?        @relation(fields: [planId], references: [id])
+
+  @@index([jobId])
+  @@index([salespersonId])
+  @@index([status])
 }

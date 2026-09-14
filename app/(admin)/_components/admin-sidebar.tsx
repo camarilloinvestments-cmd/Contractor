@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
 import {
   LayoutDashboard, Building2, Briefcase, Wrench, Users, FileText,
-  DollarSign, BarChart3, Settings, LogOut, Cable, ChevronLeft, ChevronRight, HardHat, Coins
+  DollarSign, BarChart3, Settings, LogOut, Cable, ChevronLeft, ChevronRight, HardHat, Coins, TrendingUp
 } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
@@ -24,6 +24,7 @@ const baseNavItems = [
 
 const managerNavItems = [
   { href: '/rate-books', label: 'Rate Books', icon: Coins },
+  { href: '/sales', label: 'Sales', icon: TrendingUp },
 ];
 
 const adminNavItems = [

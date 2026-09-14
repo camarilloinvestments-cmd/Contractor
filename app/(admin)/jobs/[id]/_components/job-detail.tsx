@@ -35,9 +35,19 @@ export function JobDetail({ id }: { id: string }) {
   const [loading, setLoading] = useState(true);
   const [showAddTask, setShowAddTask] = useState(false);
   const [taskForm, setTaskForm] = useState({ taskTypeId: '', description: '', quantity: '', billingRate: '', workerId: '', workerPayoutRate: '' });
+  const [financials, setFinancials] = useState<any>(null);
+  const [salespeople, setSalespeople] = useState<any[]>([]);
+  const [plans, setPlans] = useState<any[]>([]);
+  const [assignForm, setAssignForm] = useState({ salespersonId: '', commissionPlanId: '', otherDirectCosts: '' });
+  const [savingAssign, setSavingAssign] = useState(false);
+  const [recordingCommission, setRecordingCommission] = useState(false);
 
   const fetchJob = useCallback(() => {
     fetch(`/api/jobs/${id}`).then(r => r.json()).then(setJob).catch(console.error);
+  }, [id]);
+
+  const fetchFinancials = useCallback(() => {
+    fetch(`/api/jobs/${id}/financials`).then(r => r.ok ? r.json() : null).then(setFinancials).catch(console.error);
   }, [id]);
 
   useEffect(() => {
@@ -45,8 +55,46 @@ export function JobDetail({ id }: { id: string }) {
       fetch(`/api/jobs/${id}`).then(r => r.json()),
       fetch('/api/task-types').then(r => r.json()),
       fetch('/api/workers').then(r => r.json()),
-    ]).then(([j, tt, w]) => { setJob(j); setTaskTypes(tt ?? []); setWorkers(w ?? []); }).catch(console.error).finally(() => setLoading(false));
-  }, [id]);
+    ]).then(([j, tt, w]) => {
+      setJob(j); setTaskTypes(tt ?? []); setWorkers(w ?? []);
+      setAssignForm({
+        salespersonId: j?.salespersonId ?? '',
+        commissionPlanId: j?.commissionPlanId ?? '',
+        otherDirectCosts: j?.otherDirectCosts ? String(formatCentsToNumber(j.otherDirectCosts)) : '',
+      });
+    }).catch(console.error).finally(() => setLoading(false));
+    fetchFinancials();
+    fetch('/api/salespeople?status=ACTIVE').then(r => r.ok ? r.json() : []).then((d: any) => setSalespeople(Array.isArray(d) ? d : [])).catch(console.error);
+    fetch('/api/commission-plans?status=ACTIVE').then(r => r.ok ? r.json() : []).then((d: any) => setPlans(Array.isArray(d) ? d : [])).catch(console.error);
+  }, [id, fetchFinancials]);
+
+  const saveAssignment = async () => {
+    setSavingAssign(true);
+    try {
+      const res = await fetch(`/api/jobs/${id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          salespersonId: assignForm.salespersonId || null,
+          commissionPlanId: assignForm.commissionPlanId || null,
+          otherDirectCosts: dollarsToCents(parseFloat(assignForm.otherDirectCosts || '0')),
+        }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success('Financial assignment saved');
+      fetchJob(); fetchFinancials();
+    } catch { toast.error('Failed to save assignment'); } finally { setSavingAssign(false); }
+  };
+
+  const recordCommission = async () => {
+    setRecordingCommission(true);
+    try {
+      const res = await fetch(`/api/jobs/${id}/commission`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Failed');
+      toast.success('Commission recorded (rate snapshotted)');
+      fetchFinancials();
+    } catch (e: any) { toast.error(e?.message || 'Failed to record commission'); } finally { setRecordingCommission(false); }
+  };
 
   const handleStatusChange = async (newStatus: string) => {
     try {
@@ -163,6 +211,7 @@ export function JobDetail({ id }: { id: string }) {
       <Tabs defaultValue="tasks">
         <TabsList>
           <TabsTrigger value="tasks">Tasks ({tasks?.length ?? 0})</TabsTrigger>
+          <TabsTrigger value="financials">Financials</TabsTrigger>
           <TabsTrigger value="activity">Activity Log</TabsTrigger>
           <TabsTrigger value="map">Map</TabsTrigger>
           <TabsTrigger value="details">Details</TabsTrigger>
@@ -236,6 +285,101 @@ export function JobDetail({ id }: { id: string }) {
                           </div>
                         )}
                       </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="financials" className="mt-4 space-y-4">
+          <Card>
+            <CardHeader><CardTitle>Job Financial Summary</CardTitle></CardHeader>
+            <CardContent>
+              {financials ? (
+                <div className="space-y-4">
+                  <div className="grid gap-2 max-w-md">
+                    {[
+                      { label: 'Prime Revenue', value: formatCents(financials.revenue) },
+                      { label: 'Subcontractor Production Cost', value: `- ${formatCents(financials.subcontractorCost)}` },
+                      { label: 'In-House Production Cost', value: `- ${formatCents(financials.inHouseCost)}` },
+                      ...(financials.unassignedCost > 0 ? [{ label: 'Unassigned Production Cost', value: `- ${formatCents(financials.unassignedCost)}` }] : []),
+                      { label: `Sales Commission${financials.commissionIsRecorded ? ' (recorded)' : ' (preview)'}`, value: `- ${formatCents(financials.salesCommission)}` },
+                      { label: 'Other Direct Costs', value: `- ${formatCents(financials.otherDirectCosts)}` },
+                    ].map((row, i) => (
+                      <div key={i} className="flex items-center justify-between text-sm border-b border-border/50 pb-1">
+                        <span className="text-muted-foreground">{row.label}</span>
+                        <span className="font-mono">{row.value}</span>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="font-semibold">Gross Contribution</span>
+                      <span className="font-mono font-bold text-green-600">{formatCents(financials.grossContribution)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold">Gross Margin</span>
+                      <span className="font-mono font-bold text-indigo-600">{financials.grossMarginPct.toFixed(1)}%</span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> Internal figures only &mdash; never shown on client-facing exports.</p>
+                </div>
+              ) : <p className="text-sm text-muted-foreground">No financial data available.</p>}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle>Salesperson &amp; Commission</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div><Label>Salesperson</Label>
+                  <Select value={assignForm.salespersonId || 'none'} onValueChange={(v: string) => setAssignForm({ ...assignForm, salespersonId: v === 'none' ? '' : v })}>
+                    <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                    <SelectContent><SelectItem value="none">Unassigned</SelectItem>{salespeople.map((s: any) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div><Label>Compensation Plan</Label>
+                  <Select value={assignForm.commissionPlanId || 'none'} onValueChange={(v: string) => setAssignForm({ ...assignForm, commissionPlanId: v === 'none' ? '' : v })}>
+                    <SelectTrigger><SelectValue placeholder="None" /></SelectTrigger>
+                    <SelectContent><SelectItem value="none">None</SelectItem>{plans.map((p: any) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div><Label>Other Direct Costs ($)</Label>
+                  <Input type="number" step="0.01" value={assignForm.otherDirectCosts} onChange={(e: any) => setAssignForm({ ...assignForm, otherDirectCosts: e.target.value })} placeholder="0.00" />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={saveAssignment} disabled={savingAssign}>Save Assignment</Button>
+                <Button variant="outline" onClick={recordCommission} disabled={recordingCommission || !assignForm.salespersonId || !assignForm.commissionPlanId}>Calculate &amp; Record Commission</Button>
+              </div>
+              <p className="text-xs text-muted-foreground">Recording a commission snapshots the exact plan &amp; rate used at calculation time, so future plan edits never change past commissions.</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle>Cost Breakdown by Task</CardTitle></CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Task Type</TableHead><TableHead>Worker</TableHead><TableHead>Type</TableHead>
+                    <TableHead className="text-right">Qty</TableHead><TableHead className="text-right">Rate</TableHead>
+                    <TableHead className="text-right">Billable</TableHead><TableHead className="text-right">Cost</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(financials?.tasks ?? []).length === 0 && (
+                    <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-4">No tasks</TableCell></TableRow>
+                  )}
+                  {(financials?.tasks ?? []).map((t: any) => (
+                    <TableRow key={t.id}>
+                      <TableCell className="text-sm font-medium">{t.taskTypeName}</TableCell>
+                      <TableCell className="text-sm">{t.workerName ?? <span className="text-muted-foreground">Unassigned</span>}</TableCell>
+                      <TableCell className="text-xs">{t.workerType ? t.workerType.replace(/_/g, ' ') : '—'}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">{t.quantity}{t.unit ? ` ${t.unit}` : ''}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">{formatCents(t.billingRate)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">{formatCents(t.billableAmount)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">{formatCents(t.costAmount)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

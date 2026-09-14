@@ -55,6 +55,34 @@ preserved, new tables created empty, zero schema drift).
 #### Dependencies (G/H/I/J)
 - Added `exceljs` for spreadsheet template/import/export generation.
 
+### Workstreams K–L (this increment)
+
+- **K — Sales & Compensation Plans (internal cost).** New **Sales** admin area
+  (Admin & Project Manager) with **Salespeople** and **Compensation Plans** tabs.
+  Six configurable plan types — percent of revenue, percent of gross profit, flat
+  per job, flat per task, production rate (per unit), and tiered by revenue — each
+  with a configurable **earned event** (Job Completed, Job Approved, Invoice
+  Generated, Invoice Paid; default Invoice Paid) and optional prime/task overrides.
+  Commission math lives in a pure, deterministic `lib/commission.ts` (integer cents).
+  **Historical retention:** every recorded commission snapshots the exact plan
+  name, type, earned event and full rate config at calculation time, so editing or
+  archiving a plan never rewrites past commissions.
+- **L — Job Financial Summary.** New **Financials** tab on the job detail page
+  showing Prime Revenue − Subcontractor Production Cost − In-House Production Cost
+  − Sales Commission − Other Direct Costs = **Gross Contribution**, plus **Gross
+  Margin %**, with a per-task cost breakdown drill-down. Salesperson/plan
+  assignment and an Other Direct Costs editor live on the same tab, with a
+  Calculate & Record Commission action. All figures are internal and are never
+  shown on client-facing (prime) exports (`canManage` gating on every route).
+
+#### Database & migrations (K/L)
+- Additive migration `0007_sales_commission`. Adds `SALES` to `UserRole`; new
+  enums `SalespersonStatus`, `CommissionPlanType`, `CommissionEarnedEvent`,
+  `CommissionPlanStatus`, `CommissionRecordStatus`; new tables `Salesperson`,
+  `CommissionPlan`, `CommissionRecord`; new `Job` columns `otherDirectCosts`,
+  `salespersonId`, `commissionPlanId` (all nullable/defaulted — no destructive
+  change). All monetary values stored as integer cents.
+
 ---
 
 ## v1.1.0 — Migration Foundation, Branding & Email (2026-09-13)
