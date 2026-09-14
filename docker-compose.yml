@@ -5,7 +5,8 @@
 #   2. Run:  docker compose up -d --build
 #   3. Open: http://localhost:3000  (or your server's address)
 #
-# Default admin login (from seed data): admin@fibertrack.com / Admin123!
+# The reference/config seed creates NO user accounts. Create the first admin
+# through the app's first-run setup after the stack is up.
 # ---------------------------------------------------------------------------
 services:
   db:
@@ -24,6 +25,12 @@ services:
       retries: 12
 
   app:
+    # The running image is pulled from this ref. A normal `docker compose up -d`
+    # (or `--build`) uses contractor-app:current. scripts/os1-upgrade.sh builds a
+    # candidate as contractor-app:candidate-<sha>, validates it, then cuts over by
+    # setting CONTRACTOR_APP_IMAGE to that candidate and asserting the running
+    # container's image id equals the validated candidate's image id.
+    image: ${CONTRACTOR_APP_IMAGE:-contractor-app:current}
     build:
       context: .
       dockerfile: Dockerfile

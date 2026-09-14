@@ -216,12 +216,15 @@ console.log('=== Update Center / Self-Host Updater Acceptance (ruling #25) ===')
      /yarn@4|corepack/.test(preflight));
   ok(21, 'Host scripts guard disk/memory headroom (guarantee 4)',
      /df |disk|free |mem|MemAvailable|max-old-space/i.test(allHost));
+  // Migrations are applied from the validated candidate image via
+  // scripts/db-bootstrap.mjs (which runs `prisma migrate deploy` internally),
+  // so the boundary is the db-bootstrap invocation, not a literal host call.
   ok(22, 'Host upgrade takes a DB backup before migrating (guarantee 5)',
-     /pg_dump|backup/i.test(os1) && /pg_dump[\s\S]*migrate deploy|backup[\s\S]*migrate deploy/i.test(os1));
+     /pg_dump/i.test(os1) && os1.indexOf('BACKUP_RESULT="COMPLETE"') < os1.indexOf('scripts/db-bootstrap.mjs'));
   ok(23, 'Candidate image built with a unique candidate-<sha> tag (guarantee 6)',
      /candidate-/.test(os1));
   ok(24, 'Migration boundary is explicit in the upgrade script (guarantee 8)',
-     /migrate deploy/.test(os1));
+     /db-bootstrap\.mjs/.test(os1) && /MIGRATED=1/.test(os1));
   // Guarantee 10: no secret is echoed. Flag any 'echo' that prints a *_TOKEN /
   // SECRET / KEY *value* (not just a label).
   const echoLeak = /echo[^\n]*\$\{?(GITHUB_TOKEN|GH_TOKEN|.*_SECRET|.*PRIVATE_KEY|APP_ENCRYPTION_KEY)\b/i.test(allHost);
