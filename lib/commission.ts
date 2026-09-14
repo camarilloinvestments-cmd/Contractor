@@ -133,4 +133,3 @@ export function isEarned(earnedEvent: CommissionEarnedEvent, job: { status: stri
   }
 }
 
-export type Prisma_ = Prisma;

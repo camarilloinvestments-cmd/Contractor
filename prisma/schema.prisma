@@ -184,6 +184,8 @@ model PrimeContractor {
   invoices     Invoice[]
   priceBooks   PriceBook[]
   priceImports PriceImport[]
+  payments       Payment[]
+  paymentMethods PaymentMethod[]
 }
 
 model TaskType {
@@ -342,10 +344,12 @@ model Invoice {
   notes             String?
   lastEmailedAt     DateTime?
   emailCount        Int             @default(0)
+  amountPaid        Int             @default(0) // cents; sum of PAID payments
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
   primeContractor   PrimeContractor @relation(fields: [primeContractorId], references: [id])
   items             InvoiceItem[]
+  payments          Payment[]
 
   @@index([primeContractorId])
   @@index([status])
@@ -700,4 +704,143 @@ model CommissionRecord {
   @@index([jobId])
   @@index([salespersonId])
   @@index([status])
+}
+
+// ============================================================
+// Workstream M — IPPay payment connector (v1.2.0)
+// ============================================================
+enum PaymentEnvironment {
+  SANDBOX
+  PRODUCTION
+}
+
+enum PaymentProviderType {
+  IPPAY
+}
+
+enum PaymentStatus {
+  PENDING
+  AUTHORIZED
+  PAID
+  DECLINED
+  VOIDED
+  REFUNDED
+  FAILED
+}
+
+enum PaymentMethodType {
+  CARD
+  ACH
+}
+
+// Singleton payment-provider configuration. Secrets are encrypted at rest and
+// never returned to the browser or logged.
+model PaymentSettings {
+  id                    String              @id @default("default")
+  provider              PaymentProviderType @default(IPPAY)
+  enabled               Boolean             @default(false)
+  environment           PaymentEnvironment  @default(SANDBOX)
+  merchantId            String?
+  terminalId            String?
+  apiUsernameEncrypted  String?
+  apiPasswordEncrypted  String?
+  cardEnabled           Boolean             @default(true)
+  achEnabled            Boolean             @default(false)
+  tokenizationEnabled   Boolean             @default(false)
+  lastSuccessAt         DateTime?
+  lastFailureAt         DateTime?
+  lastFailureMessage    String?
+  lastConnectionStatus  String? // OK | FAILED | UNTESTED
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+}
+
+// A single financial transaction against the payment provider.
+// Writes are idempotent via the unique idempotencyKey.
+model Payment {
+  id                    String              @id @default(cuid())
+  invoiceId             String?
+  primeContractorId     String?
+  amount                Int                 @default(0) // cents
+  currency              String              @default("USD")
+  status                PaymentStatus       @default(PENDING)
+  provider              PaymentProviderType @default(IPPAY)
+  environment           PaymentEnvironment  @default(SANDBOX)
+  methodType            PaymentMethodType   @default(CARD)
+  providerTransactionId String? // original provider TransactionID
+  providerReferenceId   String? // Approval / reference code
+  actionCode            String?
+  responseText          String?
+  cardLast4             String?
+  idempotencyKey        String              @unique
+  requestId             String?
+  errorMessage          String?
+  createdById           String?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  invoice               Invoice?            @relation(fields: [invoiceId], references: [id])
+  primeContractor       PrimeContractor?    @relation(fields: [primeContractorId], references: [id])
+
+  @@index([invoiceId])
+  @@index([primeContractorId])
+  @@index([status])
+}
+
+// Tokenized payment method (where the provider supports tokenization).
+model PaymentMethod {
+  id                String            @id @default(cuid())
+  primeContractorId String
+  provider          PaymentProviderType @default(IPPAY)
+  token             String
+  methodType        PaymentMethodType @default(CARD)
+  cardLast4         String?
+  cardBrand         String?
+  expMonth          Int?
+  expYear           Int?
+  isDefault         Boolean           @default(false)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  primeContractor   PrimeContractor   @relation(fields: [primeContractorId], references: [id], onDelete: Cascade)
+
+  @@index([primeContractorId])
+}
+
+// ============================================================
+// Workstream W — API foundation / key management (v1.2.0)
+// ============================================================
+enum ApiKeyStatus {
+  ACTIVE
+  REVOKED
+}
+
+// API key for /api/v1access. The plaintext key is shown ONCE at creation and
+// only its SHA-256 hash is stored.
+model ApiKey {
+  id          String       @id @default(cuid())
+  name        String
+  keyPrefix   String // first chars for identification (e.g. os1_live_ab12)
+  keyHash     String       @unique // sha256 of the full key
+  scopes      String[]     @default([])
+  status      ApiKeyStatus @default(ACTIVE)
+  expiresAt   DateTime?
+  lastUsedAt  DateTime?
+  lastUsedIp  String?
+  createdById String?
+  createdAt   DateTime     @default(now())
+  revokedAt   DateTime?
+
+  @@index([status])
+}
+
+// Idempotency ledger for API financial writes (Idempotency-Key header).
+model ApiIdempotencyKey {
+  id           String   @id @default(cuid())
+  key          String   @unique
+  method       String
+  path         String
+  statusCode   Int?
+  responseBody Json?
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
 }

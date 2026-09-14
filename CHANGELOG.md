@@ -83,6 +83,35 @@ preserved, new tables created empty, zero schema drift).
   `salespersonId`, `commissionPlanId` (all nullable/defaulted — no destructive
   change). All monetary values stored as integer cents.
 
+### Workstreams M & W (this increment)
+
+- **M — Payment Processing (IPPay connector, sandbox-only).** New **Payments**
+  settings tab (Admin) to configure the IPPay gateway: merchant/terminal IDs,
+  write-only API username/password (encrypted at rest via `lib/crypto`, never
+  returned to the browser, never logged), and toggles for card, ACH, and
+  tokenization. A **Test Connection** action records last connection status,
+  and a **Pay Now** action on invoices (`/api/invoices/[id]/pay`) charges through
+  the gateway and posts payments against the invoice (`amountPaid`, status
+  transitions). All financial writes are **idempotent** (idempotency key + unique
+  constraint) and store the provider transaction/reference IDs and request IDs.
+  The IPPay **production endpoint is hard-disabled in code** — only the sandbox
+  gateway (`https://testgtwy.ippay.com/ippay`) is reachable in this release.
+- **W — Versioned Public API foundation.** New `/api/v1` surface with API-key
+  authentication (keys shown once at creation, stored only as SHA-256 hashes,
+  scoped, expirable, revocable, with last-used IP/time tracking), per-key rate
+  limiting, request IDs on every response, and idempotent financial writes via the
+  `Idempotency-Key` header. Read endpoints for jobs, invoices, and payments;
+  a write endpoint for payments; and a machine-readable **OpenAPI 3.0.3** document
+  at `/api/v1/openapi.json`. Keys are managed from a new **API** settings tab.
+
+#### Database & migrations (M/W)
+- Additive migration `0008_payments_api`. New enums `PaymentEnvironment`,
+  `PaymentProviderType`, `PaymentStatus`, `PaymentMethodType`, `ApiKeyStatus`;
+  new tables `PaymentSettings`, `Payment`, `PaymentMethod`, `ApiKey`,
+  `ApiIdempotencyKey`; new `Invoice.amountPaid` column (defaulted). All additive —
+  no destructive change. Monetary values stored as integer cents.
+
+---
 ---
 
 ## v1.1.0 — Migration Foundation, Branding & Email (2026-09-13)
