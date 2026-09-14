@@ -188,6 +188,7 @@ model PrimeContractor {
   priceImports PriceImport[]
   payments       Payment[]
   paymentMethods PaymentMethod[]
+  documentationWorkflows DocumentationWorkflow[]
 }
 
 model TaskType {
@@ -288,10 +289,16 @@ model Job {
   workerLocations   WorkerLocation[]
   geoEvents         GeoEvent[]
   evidencePackages  FieldEvidencePackage[]
+  documentationWorkflowVersionId String?
+  documentationWorkflowVersion   DocumentationWorkflowVersion? @relation(fields: [documentationWorkflowVersionId], references: [id])
+  cables            Cable[]
+  splicePoints      SplicePoint[]
+  closeoutRevisions CloseoutRevision[]
 
   @@index([status])
   @@index([primeContractorId])
   @@index([salespersonId])
+  @@index([documentationWorkflowVersionId])
 }
 
 model Task {
@@ -1365,4 +1372,195 @@ model EvidenceAsset {
   createdAt         DateTime             @default(now())
 
   @@index([packageId])
+}
+
+// ============================================================================
+// FIBER CLOSEOUT / DOCUMENTATION WORKFLOW (v1.2.0 workstream S)
+// Layering: CORE DATA MODEL is generic (prime-agnostic). PRIME workflow is
+// configurable. GENERATED DOCUMENTS are prime-specific, driven by the workflow
+// version pinned to the job -- never by hard-coded logic.
+// ============================================================================
+
+enum DocWorkflowStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum CloseoutStatus {
+  DRAFT       // generated, not yet submitted for approval
+  SUBMITTED   // awaiting PM/admin approval
+  APPROVED    // approved; retained immutably
+  RETURNED    // returned for correction
+}
+
+enum CablePlacement {
+  AERIAL
+  UNDERGROUND
+  UNKNOWN
+}
+
+// A prime-contractor documentation workflow (e.g. "Comcast Fiber Construction
+// Closeout"). Configurable container; the actual requirements live in versions.
+model DocumentationWorkflow {
+  id                String            @id @default(cuid())
+  primeContractorId String
+  primeContractor   PrimeContractor   @relation(fields: [primeContractorId], references: [id], onDelete: Cascade)
+  name              String
+  workType          String?           // e.g. "Fiber Construction"
+  projectType       String?           // e.g. "FTTH", "Aerial"
+  status            DocWorkflowStatus @default(DRAFT)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  versions          DocumentationWorkflowVersion[]
+
+  @@index([primeContractorId])
+  @@index([status])
+}
+
+// An immutable, versioned snapshot of a workflow's requirements. `config` holds
+// required photos/fields/tests/OTDR/power-meter/as-built/SOW/KMZ/approval
+// checklist/file-naming/invoice-gating as JSON, so new primes are added by
+// cloning + editing config -- never by changing application code.
+model DocumentationWorkflowVersion {
+  id                       String            @id @default(cuid())
+  workflowId               String
+  workflow                 DocumentationWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  version                  Int
+  status                   DocWorkflowStatus @default(DRAFT)
+  effectiveDate            DateTime?
+  expirationDate           DateTime?
+  config                   Json              // requirements config (see lib/closeout/workflow-config.ts)
+  requireCloseoutBeforeInvoice Boolean       @default(false)
+  createdAt                DateTime          @default(now())
+  jobs                     Job[]
+
+  @@unique([workflowId, version])
+  @@index([workflowId])
+  @@index([status])
+}
+
+// A fiber cable on a job. Fiber positions are auto-generated from fiberCount
+// using the standard 12-fiber color code.
+model Cable {
+  id             String          @id @default(cuid())
+  jobId          String
+  job            Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  label          String          // e.g. "Cable A", reel/segment label
+  fiberCount     Int             @default(0)
+  cableType      String?
+  reelNumber     String?
+  manufacturer   String?
+  lengthValue    Float?          // ft or metre value
+  lengthUnit     String?         @default("FT")
+  placement      CablePlacement  @default(UNKNOWN)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  fiberPositions FiberPosition[]
+  ports          Port[]
+
+  @@index([jobId])
+}
+
+// One physical fiber within a cable, positioned by the standard color code.
+model FiberPosition {
+  id          String  @id @default(cuid())
+  cableId     String
+  cable       Cable   @relation(fields: [cableId], references: [id], onDelete: Cascade)
+  position    Int     // 1-based fiber number
+  binderColor String  // binder/tube group color
+  fiberColor  String  // fiber color within the binder
+  inMappings  FiberMapping[] @relation("InFiber")
+  outMappings FiberMapping[] @relation("OutFiber")
+
+  @@unique([cableId, position])
+  @@index([cableId])
+}
+
+// A splice enclosure / closure location on a job.
+model SplicePoint {
+  id          String    @id @default(cuid())
+  jobId       String
+  job         Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  label       String    // Splice Point name/number
+  closureType String?
+  closureId   String?
+  address     String?
+  poleNumber  String?
+  placement   CablePlacement @default(UNKNOWN)
+  trayCount   Int?
+  hexMap      String?
+  splicer     String?
+  latitude    Float?
+  longitude   Float?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  ports       Port[]
+  mappings    FiberMapping[]
+
+  @@index([jobId])
+}
+
+// A cable termination position (port) at a splice point.
+model Port {
+  id            String      @id @default(cuid())
+  splicePointId String
+  splicePoint   SplicePoint @relation(fields: [splicePointId], references: [id], onDelete: Cascade)
+  portNumber    Int
+  cableId       String?
+  cable         Cable?      @relation(fields: [cableId], references: [id])
+  createdAt     DateTime    @default(now())
+  inMappings    FiberMapping[] @relation("InPort")
+  outMappings   FiberMapping[] @relation("OutPort")
+
+  @@unique([splicePointId, portNumber])
+  @@index([splicePointId])
+  @@index([cableId])
+}
+
+// A fiber splice: connects an incoming fiber position to an outgoing one at a
+// splice point.
+model FiberMapping {
+  id                String        @id @default(cuid())
+  splicePointId     String
+  splicePoint       SplicePoint   @relation(fields: [splicePointId], references: [id], onDelete: Cascade)
+  inPortId          String?
+  inPort            Port?         @relation("InPort", fields: [inPortId], references: [id])
+  inFiberPositionId String?
+  inFiberPosition   FiberPosition? @relation("InFiber", fields: [inFiberPositionId], references: [id])
+  outPortId         String?
+  outPort           Port?         @relation("OutPort", fields: [outPortId], references: [id])
+  outFiberPositionId String?
+  outFiberPosition  FiberPosition? @relation("OutFiber", fields: [outFiberPositionId], references: [id])
+  spliceType        String?       // e.g. "Fusion", "Mechanical"
+  notes             String?
+  createdAt         DateTime      @default(now())
+
+  @@index([splicePointId])
+}
+
+// An immutable generated closeout package for a job. Approved revisions are
+// retained forever (never overwritten). Stores cloud paths to the generated
+// workbook, KMZ and ZIP plus a JSON manifest.
+model CloseoutRevision {
+  id                String         @id @default(cuid())
+  jobId             String
+  job               Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  revision          Int
+  status            CloseoutStatus @default(DRAFT)
+  workflowVersionId String?
+  workbookPath      String?
+  kmzPath           String?
+  zipPath           String?
+  summaryPdfPath    String?
+  manifest          Json?
+  generatedById     String?
+  approvedById      String?
+  approvedAt        DateTime?
+  notes             String?
+  createdAt         DateTime       @default(now())
+
+  @@unique([jobId, revision])
+  @@index([jobId])
+  @@index([status])
 }
