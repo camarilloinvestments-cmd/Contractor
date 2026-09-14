@@ -1,12 +1,12 @@
 generator client {
-    provider = "prisma-client-js"
-    binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
-    output = "/home/ubuntu/fibertrack_pro/nextjs_space/node_modules/.prisma/client"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
+  output        = "/home/ubuntu/fibertrack_pro/nextjs_space/node_modules/.prisma/client"
 }
 
 datasource db {
-    provider = "postgresql"
-    url      = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 enum UserRole {
@@ -83,35 +83,41 @@ enum PriceImportStatus {
   CANCELLED
 }
 
+enum ProjectStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
 enum RateStatus {
   ACTIVE
   ARCHIVED
 }
 
 model User {
-  id             String    @id @default(cuid())
-  email          String    @unique
-  name           String
-  passwordHash   String
-  role           UserRole  @default(FIELD_WORKER)
-  status              UserStatus @default(ACTIVE)
-  forcePasswordChange Boolean    @default(false)
-  tokenVersion        Int        @default(0)
+  id                  String            @id @default(cuid())
+  email               String            @unique
+  name                String
+  passwordHash        String
+  role                UserRole          @default(FIELD_WORKER)
+  status              UserStatus        @default(ACTIVE)
+  forcePasswordChange Boolean           @default(false)
+  tokenVersion        Int               @default(0)
   deactivatedAt       DateTime?
   lastLoginAt         DateTime?
-  mfaEnabled          Boolean    @default(false)
+  mfaEnabled          Boolean           @default(false)
   mfaSecret           String?
   mfaEnrolledAt       DateTime?
   mfaLastVerifiedAt   DateTime?
-  workerId       String?   @unique
-  worker         Worker?   @relation(fields: [workerId], references: [id])
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  accounts       Account[]
-  sessions       Session[]
-  mfaRecoveryCodes MfaRecoveryCode[]
-  mobileDevices  MobileDevice[]
-  mobileSessions MobileSession[]
+  workerId            String?           @unique
+  worker              Worker?           @relation(fields: [workerId], references: [id])
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  accounts            Account[]
+  sessions            Session[]
+  mfaRecoveryCodes    MfaRecoveryCode[]
+  mobileDevices       MobileDevice[]
+  mobileSessions      MobileSession[]
 
   @@index([email])
   @@index([status])
@@ -169,35 +175,36 @@ model VerificationToken {
 }
 
 model PrimeContractor {
-  id           String   @id @default(cuid())
-  companyName  String
-  contactName  String?
-  email        String?
-  phone        String?
-  address      String?
-  city         String?
-  state        String?
-  zip          String?
-  notes        String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  rateCards    PrimeContractorRate[]
-  jobs         Job[]
-  invoices     Invoice[]
-  priceBooks   PriceBook[]
-  priceImports PriceImport[]
-  payments       Payment[]
-  paymentMethods PaymentMethod[]
+  id                     String                  @id @default(cuid())
+  companyName            String
+  contactName            String?
+  email                  String?
+  phone                  String?
+  address                String?
+  city                   String?
+  state                  String?
+  zip                    String?
+  notes                  String?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  rateCards              PrimeContractorRate[]
+  jobs                   Job[]
+  invoices               Invoice[]
+  priceBooks             PriceBook[]
+  priceImports           PriceImport[]
+  payments               Payment[]
+  paymentMethods         PaymentMethod[]
   documentationWorkflows DocumentationWorkflow[]
+  projects               Project[]
 }
 
 model TaskType {
-  id            String   @id @default(cuid())
-  name          String   @unique
+  id            String                @id @default(cuid())
+  name          String                @unique
   description   String?
   unitOfMeasure String
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
   primeRates    PrimeContractorRate[]
   workerRates   WorkerRate[]
   tasks         Task[]
@@ -207,7 +214,7 @@ model PrimeContractorRate {
   id                String          @id @default(cuid())
   primeContractorId String
   taskTypeId        String
-  ratePerUnit       Int             // cents
+  ratePerUnit       Int // cents
   primeContractor   PrimeContractor @relation(fields: [primeContractorId], references: [id], onDelete: Cascade)
   taskType          TaskType        @relation(fields: [taskTypeId], references: [id], onDelete: Cascade)
   createdAt         DateTime        @default(now())
@@ -217,29 +224,29 @@ model PrimeContractorRate {
 }
 
 model Worker {
-  id           String     @id @default(cuid())
-  name         String
-  workerType   WorkerType
-  email        String?
-  phone        String?
-  companyName  String?
-  notes        String?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  user         User?
-  rates        WorkerRate[]
-  tasks        Task[]
-  activityLogs ActivityLog[]
-  payoutRecords PayoutRecord[]
+  id                 String                 @id @default(cuid())
+  name               String
+  workerType         WorkerType
+  email              String?
+  phone              String?
+  companyName        String?
+  notes              String?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  user               User?
+  rates              WorkerRate[]
+  tasks              Task[]
+  activityLogs       ActivityLog[]
+  payoutRecords      PayoutRecord[]
   subcontractorRates SubcontractorRate[]
-  crewId       String?
-  crew         Crew?      @relation(fields: [crewId], references: [id])
-  assignedVehicles FleetVehicle[]
-  locations    WorkerLocation[]
-  geoEvents    GeoEvent[]
-  devices          MobileDevice[]
-  mobileSessions   MobileSession[]
-  evidencePackages FieldEvidencePackage[]
+  crewId             String?
+  crew               Crew?                  @relation(fields: [crewId], references: [id])
+  assignedVehicles   FleetVehicle[]
+  locations          WorkerLocation[]
+  geoEvents          GeoEvent[]
+  devices            MobileDevice[]
+  mobileSessions     MobileSession[]
+  evidencePackages   FieldEvidencePackage[]
 
   @@index([crewId])
 }
@@ -248,7 +255,7 @@ model WorkerRate {
   id          String   @id @default(cuid())
   workerId    String
   taskTypeId  String
-  ratePerUnit Int      // cents
+  ratePerUnit Int // cents
   worker      Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
   taskType    TaskType @relation(fields: [taskTypeId], references: [id], onDelete: Cascade)
   createdAt   DateTime @default(now())
@@ -258,77 +265,95 @@ model WorkerRate {
 }
 
 model Job {
-  id                String          @id @default(cuid())
-  jobNumber         String          @unique
-  jobName           String
-  primeContractorId String
-  address           String?
-  city              String?
-  state             String?
-  zip               String?
-  latitude          Float?
-  longitude         Float?
-  startDate         DateTime?
-  dueDate           DateTime?
-  status            JobStatus       @default(DRAFT)
-  notes             String?
-  otherDirectCosts  Int             @default(0) // cents; manual non-labor direct costs
-  salespersonId     String?
-  commissionPlanId  String?
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  primeContractor   PrimeContractor @relation(fields: [primeContractorId], references: [id])
-  salesperson       Salesperson?    @relation(fields: [salespersonId], references: [id])
-  commissionPlan    CommissionPlan? @relation(fields: [commissionPlanId], references: [id])
-  commissionRecords CommissionRecord[]
-  tasks             Task[]
-  activityLogs      ActivityLog[]
-  geofenceRadiusFeet Int?           // per-job geofence override (feet); default in code
-  currentVehicles   FleetVehicle[]
-  vehicleTelemetry  VehicleTelemetry[]
-  workerLocations   WorkerLocation[]
-  geoEvents         GeoEvent[]
-  evidencePackages  FieldEvidencePackage[]
+  id                             String                        @id @default(cuid())
+  jobNumber                      String                        @unique
+  jobName                        String
+  primeContractorId              String
+  projectId                      String?
+  priceBookId                    String?
+  priceBookVersionId             String?
+  address                        String?
+  city                           String?
+  state                          String?
+  zip                            String?
+  latitude                       Float?
+  longitude                      Float?
+  startDate                      DateTime?
+  dueDate                        DateTime?
+  status                         JobStatus                     @default(DRAFT)
+  notes                          String?
+  otherDirectCosts               Int                           @default(0) // cents; manual non-labor direct costs
+  salespersonId                  String?
+  commissionPlanId               String?
+  createdAt                      DateTime                      @default(now())
+  updatedAt                      DateTime                      @updatedAt
+  primeContractor                PrimeContractor               @relation(fields: [primeContractorId], references: [id])
+  project                        Project?                      @relation(fields: [projectId], references: [id])
+  priceBook                      PriceBook?                    @relation("JobPriceBook", fields: [priceBookId], references: [id])
+  priceBookVersion               PriceBookVersion?             @relation("JobPriceBookVersion", fields: [priceBookVersionId], references: [id])
+  salesperson                    Salesperson?                  @relation(fields: [salespersonId], references: [id])
+  commissionPlan                 CommissionPlan?               @relation(fields: [commissionPlanId], references: [id])
+  commissionRecords              CommissionRecord[]
+  tasks                          Task[]
+  activityLogs                   ActivityLog[]
+  geofenceRadiusFeet             Int? // per-job geofence override (feet); default in code
+  currentVehicles                FleetVehicle[]
+  vehicleTelemetry               VehicleTelemetry[]
+  workerLocations                WorkerLocation[]
+  geoEvents                      GeoEvent[]
+  evidencePackages               FieldEvidencePackage[]
   documentationWorkflowVersionId String?
   documentationWorkflowVersion   DocumentationWorkflowVersion? @relation(fields: [documentationWorkflowVersionId], references: [id])
-  cables            Cable[]
-  splicePoints      SplicePoint[]
-  closeoutRevisions CloseoutRevision[]
+  cables                         Cable[]
+  splicePoints                   SplicePoint[]
+  closeoutRevisions              CloseoutRevision[]
 
   @@index([status])
   @@index([primeContractorId])
+  @@index([projectId])
+  @@index([priceBookId])
+  @@index([priceBookVersionId])
   @@index([salespersonId])
   @@index([documentationWorkflowVersionId])
 }
 
 model Task {
-  id              String     @id @default(cuid())
-  jobId           String
-  taskTypeId      String
-  description     String?
-  quantity        Float      @default(0)
-  billingRate     Int        @default(0) // cents per unit
-  workerPayoutRate Int       @default(0) // cents per unit
-  workerId        String?
-  status          TaskStatus @default(PENDING)
-  billableAmount  Int        @default(0) // cents
-  costAmount      Int        @default(0) // cents
-  profitAmount    Int        @default(0) // cents
-  invoiceItemId   String?
-  payoutRecordId  String?
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
-  job             Job        @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  taskType        TaskType   @relation(fields: [taskTypeId], references: [id])
-  worker          Worker?    @relation(fields: [workerId], references: [id])
-  invoiceItem     InvoiceItem? @relation(fields: [invoiceItemId], references: [id])
-  payoutRecord    PayoutRecord? @relation(fields: [payoutRecordId], references: [id])
-  activityLogs    ActivityLog[]
-  evidencePackages FieldEvidencePackage[]
+  id                       String                 @id @default(cuid())
+  jobId                    String
+  taskTypeId               String
+  description              String?
+  quantity                 Float                  @default(0)
+  billingRate              Int                    @default(0) // cents per unit
+  workerPayoutRate         Int                    @default(0) // cents per unit
+  priceBookId              String? // snapshot: source price book at time code added to task
+  priceBookVersionId       String? // snapshot: pinned version the code was resolved from
+  billingCode              String? // snapshot: opaque code (e.g. A3) as it existed in that version
+  descriptionSnapshot      String? // snapshot: line description at time of add
+  unitSnapshot             String? // snapshot: unit of measure at time of add
+  primeRatePerUnitSnapshot Int? // snapshot: prime rate per unit (cents) at time of add
+  calculatedPrimeAmount    Int? // snapshot: quantity * primeRatePerUnitSnapshot (cents)
+  workerId                 String?
+  status                   TaskStatus             @default(PENDING)
+  billableAmount           Int                    @default(0) // cents
+  costAmount               Int                    @default(0) // cents
+  profitAmount             Int                    @default(0) // cents
+  invoiceItemId            String?
+  payoutRecordId           String?
+  createdAt                DateTime               @default(now())
+  updatedAt                DateTime               @updatedAt
+  job                      Job                    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  taskType                 TaskType               @relation(fields: [taskTypeId], references: [id])
+  priceBookVersion         PriceBookVersion?      @relation(fields: [priceBookVersionId], references: [id])
+  worker                   Worker?                @relation(fields: [workerId], references: [id])
+  invoiceItem              InvoiceItem?           @relation(fields: [invoiceItemId], references: [id])
+  payoutRecord             PayoutRecord?          @relation(fields: [payoutRecordId], references: [id])
+  activityLogs             ActivityLog[]
+  evidencePackages         FieldEvidencePackage[]
 
   @@index([jobId])
   @@index([workerId])
   @@index([status])
+  @@index([priceBookVersionId])
 }
 
 model ActivityLog {
@@ -345,7 +370,7 @@ model ActivityLog {
   latitude         Float?
   longitude        Float?
   gpsAccuracy      Float?
-  distanceFromJob  Float?       // in feet
+  distanceFromJob  Float? // in feet
   proximityWarning Boolean      @default(false)
   createdAt        DateTime     @default(now())
   job              Job?         @relation(fields: [jobId], references: [id], onDelete: Cascade)
@@ -386,23 +411,23 @@ model InvoiceItem {
   invoiceId   String
   description String
   quantity    Float
-  unitPrice   Int     // cents
-  amount      Int     // cents
+  unitPrice   Int // cents
+  amount      Int // cents
   jobId       String?
   invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   tasks       Task[]
 }
 
 model PayoutRecord {
-  id         String       @id @default(cuid())
-  workerId   String
-  totalAmount Int         @default(0) // cents
-  status     PayoutStatus @default(PENDING)
-  notes      String?
-  createdAt  DateTime     @default(now())
-  updatedAt  DateTime     @updatedAt
-  worker     Worker       @relation(fields: [workerId], references: [id])
-  tasks      Task[]
+  id          String       @id @default(cuid())
+  workerId    String
+  totalAmount Int          @default(0) // cents
+  status      PayoutStatus @default(PENDING)
+  notes       String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  worker      Worker       @relation(fields: [workerId], references: [id])
+  tasks       Task[]
 
   @@index([workerId])
   @@index([status])
@@ -417,29 +442,29 @@ model PayoutRecord {
 // Multi-tenant branding is intentionally deferred; this model can later gain a
 // tenantId without altering existing columns.
 model CompanyProfile {
-  id            String   @id @default("default")
-  companyName   String   @default("OS1 Fiber Track Pro")
-  legalName     String?
-  tagline       String?  @default("Fiber Construction Services")
-  logoUrl       String?
+  id              String   @id @default("default")
+  companyName     String   @default("OS1 Fiber Track Pro")
+  legalName       String?
+  tagline         String?  @default("Fiber Construction Services")
+  logoUrl         String?
   logoStoragePath String?
   logoContentType String?
-  address       String?
-  city          String?
-  state         String?
-  zip           String?
-  phone         String?
-  email         String?
-  website       String?
-  supportEmail  String?
-  supportPhone  String?
-  primaryColor  String   @default("#1e40af")
-  accentColor   String   @default("#0891b2")
-  invoicePrefix String?  @default("INV")
-  invoiceFooter String?  @default("Thank you for your business")
-  portalUrl     String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  address         String?
+  city            String?
+  state           String?
+  zip             String?
+  phone           String?
+  email           String?
+  website         String?
+  supportEmail    String?
+  supportPhone    String?
+  primaryColor    String   @default("#1e40af")
+  accentColor     String   @default("#0891b2")
+  invoicePrefix   String?  @default("INV")
+  invoiceFooter   String?  @default("Thank you for your business")
+  portalUrl       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 // SMTP / email provider configuration (singleton row id = "default").
@@ -526,44 +551,107 @@ model AuditLog {
 // rates creates a new version; historical price books/rates are never overwritten.
 // -----------------------------------------------------------------------------
 
-model PriceBook {
-  id                String          @id @default(cuid())
-  primeContractorId String
-  name              String
-  contract          String?
-  project           String?
-  market            String?
-  region            String?
-  effectiveDate     DateTime?
-  expirationDate    DateTime?
-  version           Int             @default(1)
-  status            PriceBookStatus @default(DRAFT)
-  notes             String?
-  createdById       String?
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  primeContractor   PrimeContractor @relation(fields: [primeContractorId], references: [id], onDelete: Cascade)
-  lines             PriceLine[]
-  imports           PriceImport[]
+// A first-class Project scoped to a Prime Contractor. Billing/SOW codes have no
+// universal meaning; they are resolved only inside a Project's Prime Price Book
+// Version. Project codes are unique WITHIN a prime, never globally.
+model Project {
+  id                        String            @id @default(cuid())
+  primeContractorId         String
+  projectCode               String
+  projectName               String?
+  description               String?
+  status                    ProjectStatus     @default(ACTIVE)
+  defaultPriceBookId        String?
+  defaultPriceBookVersionId String?
+  createdById               String?
+  createdAt                 DateTime          @default(now())
+  updatedAt                 DateTime          @updatedAt
+  primeContractor           PrimeContractor   @relation(fields: [primeContractorId], references: [id], onDelete: Cascade)
+  defaultPriceBook          PriceBook?        @relation("ProjectDefaultBook", fields: [defaultPriceBookId], references: [id], onDelete: SetNull)
+  defaultPriceBookVersion   PriceBookVersion? @relation("ProjectDefaultVersion", fields: [defaultPriceBookVersionId], references: [id], onDelete: SetNull)
+  priceBooks                PriceBook[]       @relation("PriceBookProject")
+  jobs                      Job[]
 
+  @@unique([primeContractorId, projectCode])
   @@index([primeContractorId])
   @@index([status])
 }
 
-model PriceLine {
-  id          String    @id @default(cuid())
-  priceBookId String
-  jobCode     String
-  description String
-  unit        String
-  ratePerUnit Int       // cents per unit; what the prime pays us
-  category    String?
-  notes       String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  priceBook   PriceBook @relation(fields: [priceBookId], references: [id], onDelete: Cascade)
+// An immutable, pinnable Price Book Version. A Price Book is the named container
+// (Prime + optional Project + name); each version holds its own set of lines.
+// Once a version is ACTIVE and pinned to a Work Order, its lines must never be
+// mutated — a newer price sheet becomes a NEW version, never a rewrite.
+model PriceBookVersion {
+  id                 String          @id @default(cuid())
+  priceBookId        String
+  version            Int
+  label              String?
+  effectiveDate      DateTime?
+  expirationDate     DateTime?
+  status             PriceBookStatus @default(DRAFT)
+  notes              String?
+  createdById        String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  priceBook          PriceBook       @relation(fields: [priceBookId], references: [id], onDelete: Cascade)
+  lines              PriceLine[]
+  jobs               Job[]           @relation("JobPriceBookVersion")
+  tasks              Task[]
+  imports            PriceImport[]
+  defaultForProjects Project[]       @relation("ProjectDefaultVersion")
 
-  @@unique([priceBookId, jobCode])
+  @@unique([priceBookId, version])
+  @@index([priceBookId])
+  @@index([status])
+}
+
+model PriceBook {
+  id                 String             @id @default(cuid())
+  primeContractorId  String
+  projectId          String?
+  name               String
+  contract           String?
+  projectLabel       String?            @map("project") // legacy free-text project label (superseded by projectId relation)
+  market             String?
+  region             String?
+  effectiveDate      DateTime?
+  expirationDate     DateTime?
+  version            Int                @default(1)
+  status             PriceBookStatus    @default(DRAFT)
+  notes              String?
+  createdById        String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  primeContractor    PrimeContractor    @relation(fields: [primeContractorId], references: [id], onDelete: Cascade)
+  project            Project?           @relation("PriceBookProject", fields: [projectId], references: [id], onDelete: SetNull)
+  lines              PriceLine[]
+  versions           PriceBookVersion[]
+  imports            PriceImport[]
+  jobs               Job[]              @relation("JobPriceBook")
+  defaultForProjects Project[]          @relation("ProjectDefaultBook")
+
+  @@index([primeContractorId])
+  @@index([projectId])
+  @@index([status])
+}
+
+model PriceLine {
+  id                 String           @id @default(cuid())
+  priceBookId        String
+  priceBookVersionId String
+  jobCode            String
+  description        String
+  unit               String
+  ratePerUnit        Int // cents per unit; what the prime pays us
+  category           String?
+  notes              String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  priceBook          PriceBook        @relation(fields: [priceBookId], references: [id], onDelete: Cascade)
+  priceBookVersion   PriceBookVersion @relation(fields: [priceBookVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([priceBookVersionId, jobCode])
+  @@index([priceBookId])
   @@index([jobCode])
 }
 
@@ -571,26 +659,28 @@ model PriceLine {
 // becomes active until APPROVE IMPORT. Stores the original upload, original
 // values, AI-suggested mapping, final (human) mapping, approver, and timestamp.
 model PriceImport {
-  id                String            @id @default(cuid())
-  primeContractorId String
-  priceBookId       String?
-  originalFilename  String
-  storagePath       String?
-  fileType          String?
-  status            PriceImportStatus @default(PENDING)
-  usedAi            Boolean           @default(false)
-  aiMapping         Json?
-  finalMapping      Json?
-  parsedRows        Json?
-  summary           Json?
-  errorRows         Json?
-  createdById       String?
-  approvedById      String?
-  approvedAt        DateTime?
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
-  primeContractor   PrimeContractor   @relation(fields: [primeContractorId], references: [id], onDelete: Cascade)
-  priceBook         PriceBook?        @relation(fields: [priceBookId], references: [id], onDelete: SetNull)
+  id                 String            @id @default(cuid())
+  primeContractorId  String
+  priceBookId        String?
+  priceBookVersionId String?
+  originalFilename   String
+  storagePath        String?
+  fileType           String?
+  status             PriceImportStatus @default(PENDING)
+  usedAi             Boolean           @default(false)
+  aiMapping          Json?
+  finalMapping       Json?
+  parsedRows         Json?
+  summary            Json?
+  errorRows          Json?
+  createdById        String?
+  approvedById       String?
+  approvedAt         DateTime?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  primeContractor    PrimeContractor   @relation(fields: [primeContractorId], references: [id], onDelete: Cascade)
+  priceBook          PriceBook?        @relation(fields: [priceBookId], references: [id], onDelete: SetNull)
+  priceBookVersion   PriceBookVersion? @relation(fields: [priceBookVersionId], references: [id], onDelete: SetNull)
 
   @@index([primeContractorId])
   @@index([status])
@@ -605,7 +695,7 @@ model SubcontractorRate {
   jobCode        String
   description    String?
   unit           String?
-  ratePerUnit    Int        // cents per unit; what we pay this subcontractor
+  ratePerUnit    Int // cents per unit; what we pay this subcontractor
   version        Int        @default(1)
   effectiveDate  DateTime?
   expirationDate DateTime?
@@ -627,7 +717,7 @@ model InHouseRate {
   jobCode        String
   description    String?
   unit           String?
-  ratePerUnit    Int        // cents per unit; internal cost
+  ratePerUnit    Int // cents per unit; internal cost
   version        Int        @default(1)
   effectiveDate  DateTime?
   expirationDate DateTime?
@@ -674,34 +764,34 @@ enum CommissionRecordStatus {
 }
 
 model Salesperson {
-  id        String            @id @default(cuid())
-  name      String
-  email     String?
-  phone     String?
-  userId    String?           @unique
-  status    SalespersonStatus @default(ACTIVE)
-  notes     String?
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
-  jobs      Job[]
+  id                String             @id @default(cuid())
+  name              String
+  email             String?
+  phone             String?
+  userId            String?            @unique
+  status            SalespersonStatus  @default(ACTIVE)
+  notes             String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  jobs              Job[]
   commissionRecords CommissionRecord[]
 
   @@index([status])
 }
 
 model CommissionPlan {
-  id           String                @id @default(cuid())
-  name         String
-  planType     CommissionPlanType
-  earnedEvent  CommissionEarnedEvent @default(INVOICE_PAID)
-  config       Json                  @default("{}") // rate/percent/tiers/prime & task overrides
-  status       CommissionPlanStatus  @default(ACTIVE)
-  version      Int                   @default(1)
-  notes        String?
-  createdById  String?
-  createdAt    DateTime              @default(now())
-  updatedAt    DateTime              @updatedAt
-  jobs         Job[]
+  id                String                @id @default(cuid())
+  name              String
+  planType          CommissionPlanType
+  earnedEvent       CommissionEarnedEvent @default(INVOICE_PAID)
+  config            Json                  @default("{}") // rate/percent/tiers/prime & task overrides
+  status            CommissionPlanStatus  @default(ACTIVE)
+  version           Int                   @default(1)
+  notes             String?
+  createdById       String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  jobs              Job[]
   commissionRecords CommissionRecord[]
 
   @@index([status])
@@ -712,9 +802,9 @@ model CommissionRecord {
   jobId            String
   salespersonId    String
   planId           String?
-  planName         String                 // snapshot of plan name at calc time
-  planType         CommissionPlanType     // snapshot
-  earnedEvent      CommissionEarnedEvent  // snapshot
+  planName         String // snapshot of plan name at calc time
+  planType         CommissionPlanType // snapshot
+  earnedEvent      CommissionEarnedEvent // snapshot
   rateSnapshot     Json                   @default("{}") // full plan config at calc time
   basisAmount      Int                    @default(0) // cents (revenue or gross profit basis)
   commissionAmount Int                    @default(0) // cents
@@ -762,23 +852,23 @@ enum PaymentMethodType {
 // Singleton payment-provider configuration. Secrets are encrypted at rest and
 // never returned to the browser or logged.
 model PaymentSettings {
-  id                    String              @id @default("default")
-  provider              PaymentProviderType @default(IPPAY)
-  enabled               Boolean             @default(false)
-  environment           PaymentEnvironment  @default(SANDBOX)
-  merchantId            String?
-  terminalId            String?
-  apiUsernameEncrypted  String?
-  apiPasswordEncrypted  String?
-  cardEnabled           Boolean             @default(true)
-  achEnabled            Boolean             @default(false)
-  tokenizationEnabled   Boolean             @default(false)
-  lastSuccessAt         DateTime?
-  lastFailureAt         DateTime?
-  lastFailureMessage    String?
-  lastConnectionStatus  String? // OK | FAILED | UNTESTED
-  createdAt             DateTime            @default(now())
-  updatedAt             DateTime            @updatedAt
+  id                   String              @id @default("default")
+  provider             PaymentProviderType @default(IPPAY)
+  enabled              Boolean             @default(false)
+  environment          PaymentEnvironment  @default(SANDBOX)
+  merchantId           String?
+  terminalId           String?
+  apiUsernameEncrypted String?
+  apiPasswordEncrypted String?
+  cardEnabled          Boolean             @default(true)
+  achEnabled           Boolean             @default(false)
+  tokenizationEnabled  Boolean             @default(false)
+  lastSuccessAt        DateTime?
+  lastFailureAt        DateTime?
+  lastFailureMessage   String?
+  lastConnectionStatus String? // OK | FAILED | UNTESTED
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
 }
 
 // A single financial transaction against the payment provider.
@@ -814,19 +904,19 @@ model Payment {
 
 // Tokenized payment method (where the provider supports tokenization).
 model PaymentMethod {
-  id                String            @id @default(cuid())
+  id                String              @id @default(cuid())
   primeContractorId String
   provider          PaymentProviderType @default(IPPAY)
   token             String
-  methodType        PaymentMethodType @default(CARD)
+  methodType        PaymentMethodType   @default(CARD)
   cardLast4         String?
   cardBrand         String?
   expMonth          Int?
   expYear           Int?
-  isDefault         Boolean           @default(false)
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
-  primeContractor   PrimeContractor   @relation(fields: [primeContractorId], references: [id], onDelete: Cascade)
+  isDefault         Boolean             @default(false)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  primeContractor   PrimeContractor     @relation(fields: [primeContractorId], references: [id], onDelete: Cascade)
 
   @@index([primeContractorId])
 }
@@ -910,13 +1000,13 @@ enum GeoActorType {
 // A dispatchable crew (in-house or subcontractor). Workers and vehicles can be
 // assigned to a crew for operational visibility on the Live Map.
 model Crew {
-  id                   String        @id @default(cuid())
+  id                   String                 @id @default(cuid())
   name                 String
   subcontractorCompany String?
   notes                String?
-  active               Boolean       @default(true)
-  createdAt            DateTime      @default(now())
-  updatedAt            DateTime      @updatedAt
+  active               Boolean                @default(true)
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
   members              Worker[]
   vehicles             FleetVehicle[]
   geoEvents            GeoEvent[]
@@ -928,41 +1018,41 @@ model Crew {
 // Singleton fleet-provider (Geotab) configuration. Credentials are encrypted at
 // rest, never returned to the browser, and never written to logs.
 model FleetProviderSettings {
-  id                    String            @id @default("default")
-  provider              FleetProviderType @default(GEOTAB)
-  enabled               Boolean           @default(false)
-  syncEnabled           Boolean           @default(false)
-  database              String? // Geotab company/database
-  username              String? // Geotab API identity (not secret)
-  credentialEncrypted   String? // Geotab password/credential (encrypted at rest)
-  sessionIdEncrypted    String? // cached Geotab session token (encrypted at rest)
-  serverUrl             String? // resolved Geotab server (e.g. myXXXX.geotab.com)
-  lastSuccessAt         DateTime?
-  lastFailureAt         DateTime?
-  lastSyncError         String?
-  lastConnectionStatus  String? // OK | FAILED | UNTESTED
-  createdAt             DateTime          @default(now())
-  updatedAt             DateTime          @updatedAt
+  id                   String            @id @default("default")
+  provider             FleetProviderType @default(GEOTAB)
+  enabled              Boolean           @default(false)
+  syncEnabled          Boolean           @default(false)
+  database             String? // Geotab company/database
+  username             String? // Geotab API identity (not secret)
+  credentialEncrypted  String? // Geotab password/credential (encrypted at rest)
+  sessionIdEncrypted   String? // cached Geotab session token (encrypted at rest)
+  serverUrl            String? // resolved Geotab server (e.g. myXXXX.geotab.com)
+  lastSuccessAt        DateTime?
+  lastFailureAt        DateTime?
+  lastSyncError        String?
+  lastConnectionStatus String? // OK | FAILED | UNTESTED
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
 }
 
 // Persisted feed checkpoints so continuous synchronization can resume without
 // starting over or duplicating historical records (Geotab GetFeed fromVersion).
 model FleetFeedState {
-  id           String            @id @default(cuid())
-  provider     FleetProviderType @default(GEOTAB)
-  dataType     String // e.g. DeviceStatusInfo | LogRecord | Trip
-  fromVersion  String?
-  lastSyncAt   DateTime?
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
+  id          String            @id @default(cuid())
+  provider    FleetProviderType @default(GEOTAB)
+  dataType    String // e.g. DeviceStatusInfo | LogRecord | Trip
+  fromVersion String?
+  lastSyncAt  DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
 
   @@unique([provider, dataType])
 }
 
 // Normalized fleet vehicle. geotabDeviceId ties it to the provider device.
 model FleetVehicle {
-  id                   String            @id @default(cuid())
-  provider             FleetProviderType @default(GEOTAB)
+  id                   String             @id @default(cuid())
+  provider             FleetProviderType  @default(GEOTAB)
   geotabDeviceId       String?
   name                 String
   vehicleNumber        String?
@@ -971,16 +1061,16 @@ model FleetVehicle {
   model                String?
   year                 Int?
   licensePlate         String?
-  active               Boolean           @default(true)
+  active               Boolean            @default(true)
   assignedCrewId       String?
   assignedWorkerId     String?
   subcontractorCompany String?
   currentJobId         String?
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
-  crew                 Crew?             @relation(fields: [assignedCrewId], references: [id])
-  worker               Worker?           @relation(fields: [assignedWorkerId], references: [id])
-  currentJob           Job?              @relation(fields: [currentJobId], references: [id])
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  crew                 Crew?              @relation(fields: [assignedCrewId], references: [id])
+  worker               Worker?            @relation(fields: [assignedWorkerId], references: [id])
+  currentJob           Job?               @relation(fields: [currentJobId], references: [id])
   state                VehicleState?
   telemetry            VehicleTelemetry[]
   trips                VehicleTrip[]
@@ -1036,7 +1126,7 @@ model VehicleTelemetry {
 
 // Trip / logistics rollups where authorized Geotab data is available.
 model VehicleTrip {
-  id             String       @id @default(cuid())
+  id             String         @id @default(cuid())
   vehicleId      String
   source         LocationSource @default(GEOTAB)
   startAt        DateTime
@@ -1050,8 +1140,8 @@ model VehicleTrip {
   odometerMeters Float?
   engineHours    Float?
   providerRef    String?
-  createdAt      DateTime     @default(now())
-  vehicle        FleetVehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  createdAt      DateTime       @default(now())
+  vehicle        FleetVehicle   @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
 
   @@unique([vehicleId, providerRef])
   @@index([vehicleId, startAt])
@@ -1059,17 +1149,17 @@ model VehicleTrip {
 
 // Continuous mobile-worker GPS stream (distinct from ActivityLog evidence GPS).
 model WorkerLocation {
-  id          String         @id @default(cuid())
-  workerId    String
-  source      LocationSource @default(MOBILE_APP)
-  latitude    Float
-  longitude   Float
-  recordedAt  DateTime
-  accuracy    Float?
-  jobId       String?
-  createdAt   DateTime       @default(now())
-  worker      Worker         @relation(fields: [workerId], references: [id], onDelete: Cascade)
-  job         Job?           @relation(fields: [jobId], references: [id])
+  id         String         @id @default(cuid())
+  workerId   String
+  source     LocationSource @default(MOBILE_APP)
+  latitude   Float
+  longitude  Float
+  recordedAt DateTime
+  accuracy   Float?
+  jobId      String?
+  createdAt  DateTime       @default(now())
+  worker     Worker         @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  job        Job?           @relation(fields: [jobId], references: [id])
 
   @@index([workerId, recordedAt])
   @@index([jobId])
@@ -1201,27 +1291,27 @@ enum DeviceStatus {
 // A registered mobile device (P — Device Management). A worker may have several
 // devices; each can be revoked independently (kills its sessions too).
 model MobileDevice {
-  id           String         @id @default(cuid())
-  deviceUuid   String         @unique // stable client-generated device identifier
-  workerId     String?
-  worker       Worker?        @relation(fields: [workerId], references: [id])
-  userId       String?
-  user         User?          @relation(fields: [userId], references: [id])
-  platform     DevicePlatform @default(ANDROID)
-  deviceName   String?
-  deviceModel  String?
-  osVersion    String?
-  appVersion   String?
-  pushToken    String? // Expo/FCM/APNs push token (opaque; not a secret)
-  status       DeviceStatus   @default(ACTIVE)
-  lastSeenAt   DateTime?
-  lastIp       String?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  revokedAt    DateTime?
-  revokedById  String?
-  sessions     MobileSession[]
-  syncEvents   MobileSyncEvent[]
+  id               String                 @id @default(cuid())
+  deviceUuid       String                 @unique // stable client-generated device identifier
+  workerId         String?
+  worker           Worker?                @relation(fields: [workerId], references: [id])
+  userId           String?
+  user             User?                  @relation(fields: [userId], references: [id])
+  platform         DevicePlatform         @default(ANDROID)
+  deviceName       String?
+  deviceModel      String?
+  osVersion        String?
+  appVersion       String?
+  pushToken        String? // Expo/FCM/APNs push token (opaque; not a secret)
+  status           DeviceStatus           @default(ACTIVE)
+  lastSeenAt       DateTime?
+  lastIp           String?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  revokedAt        DateTime?
+  revokedById      String?
+  sessions         MobileSession[]
+  syncEvents       MobileSyncEvent[]
   evidencePackages FieldEvidencePackage[]
 
   @@index([workerId])
@@ -1231,19 +1321,19 @@ model MobileDevice {
 // A device-bound session token (P — Session Revocation). Only the SHA-256 hash
 // of the token is stored; the plaintext is returned to the device once at login.
 model MobileSession {
-  id           String        @id @default(cuid())
-  tokenHash    String        @unique
-  deviceId     String
-  device       MobileDevice  @relation(fields: [deviceId], references: [id], onDelete: Cascade)
-  workerId     String?
-  worker       Worker?       @relation(fields: [workerId], references: [id])
-  userId       String?
-  user         User?         @relation(fields: [userId], references: [id])
-  mfaVerified  Boolean       @default(false)
-  expiresAt    DateTime
-  lastUsedAt   DateTime?
-  createdAt    DateTime      @default(now())
-  revokedAt    DateTime?
+  id          String       @id @default(cuid())
+  tokenHash   String       @unique
+  deviceId    String
+  device      MobileDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  workerId    String?
+  worker      Worker?      @relation(fields: [workerId], references: [id])
+  userId      String?
+  user        User?        @relation(fields: [userId], references: [id])
+  mfaVerified Boolean      @default(false)
+  expiresAt   DateTime
+  lastUsedAt  DateTime?
+  createdAt   DateTime     @default(now())
+  revokedAt   DateTime?
 
   @@index([deviceId])
   @@index([workerId])
@@ -1272,21 +1362,21 @@ enum SyncResult {
 // replays are de-duplicated and conflicts are surfaced. This is the durable
 // server acknowledgment the client reconciles against.
 model MobileSyncEvent {
-  id             String         @id @default(cuid())
-  deviceId       String?
-  device         MobileDevice?  @relation(fields: [deviceId], references: [id])
-  workerId       String?
-  localUuid      String // client-generated UUID for the queued record
-  idempotencyKey String         @unique // stable key; dedupes retries
-  entityType     SyncEntityType
-  result         SyncResult     @default(ACCEPTED)
-  serverEntityId String? // id of the created/updated server row, when applicable
-  conflictStatus String? // null | "server_newer" | "duplicate" | details
-  deviceTimestamp DateTime? // when captured on device
+  id               String         @id @default(cuid())
+  deviceId         String?
+  device           MobileDevice?  @relation(fields: [deviceId], references: [id])
+  workerId         String?
+  localUuid        String // client-generated UUID for the queued record
+  idempotencyKey   String         @unique // stable key; dedupes retries
+  entityType       SyncEntityType
+  result           SyncResult     @default(ACCEPTED)
+  serverEntityId   String? // id of the created/updated server row, when applicable
+  conflictStatus   String? // null | "server_newer" | "duplicate" | details
+  deviceTimestamp  DateTime? // when captured on device
   createdTimestamp DateTime? // when queued on device
-  retryCount     Int            @default(0)
-  lastError      String?
-  createdAt      DateTime       @default(now())
+  retryCount       Int            @default(0)
+  lastError        String?
+  createdAt        DateTime       @default(now())
 
   @@unique([deviceId, localUuid])
   @@index([workerId])
@@ -1315,38 +1405,38 @@ enum EvidenceStatus {
 // preserves the full completion context. Treated as immutable evidence once
 // ACCEPTED — never edited or deleted (status may be FLAGGED for review).
 model FieldEvidencePackage {
-  id                 String          @id @default(cuid())
-  localUuid          String          @unique // client UUID; idempotent submission
-  jobId              String
-  job                Job             @relation(fields: [jobId], references: [id])
-  taskId             String?
-  task               Task?           @relation(fields: [taskId], references: [id])
-  workerId           String?
-  worker             Worker?         @relation(fields: [workerId], references: [id])
-  crewId             String?
-  crew               Crew?           @relation(fields: [crewId], references: [id])
-  subcontractorName  String? // denormalized subcontractor company at time of work
-  deviceId           String?
-  device             MobileDevice?   @relation(fields: [deviceId], references: [id])
-  latitude           Float?
-  longitude          Float?
-  gpsAccuracyMeters  Float?
-  geofenceStatus     GeofenceStatus  @default(UNKNOWN)
+  id                   String          @id @default(cuid())
+  localUuid            String          @unique // client UUID; idempotent submission
+  jobId                String
+  job                  Job             @relation(fields: [jobId], references: [id])
+  taskId               String?
+  task                 Task?           @relation(fields: [taskId], references: [id])
+  workerId             String?
+  worker               Worker?         @relation(fields: [workerId], references: [id])
+  crewId               String?
+  crew                 Crew?           @relation(fields: [crewId], references: [id])
+  subcontractorName    String? // denormalized subcontractor company at time of work
+  deviceId             String?
+  device               MobileDevice?   @relation(fields: [deviceId], references: [id])
+  latitude             Float?
+  longitude            Float?
+  gpsAccuracyMeters    Float?
+  geofenceStatus       GeofenceStatus  @default(UNKNOWN)
   geofenceDistanceFeet Float?
-  productionQuantity Float?
-  productionUnit     String?
-  notes              String?
+  productionQuantity   Float?
+  productionUnit       String?
+  notes                String?
   signatureStoragePath String?
   signatureContentType String?
-  signedByName       String?
-  capturedAt         DateTime? // device timestamp of completion
-  submittedAt        DateTime        @default(now()) // server receipt
-  status             EvidenceStatus  @default(SUBMITTED)
-  reviewedById       String? // admin/PM who approved or flagged
-  reviewedAt         DateTime?
-  reviewNote         String? // reason for flag / correction request
-  assets             EvidenceAsset[]
-  createdAt          DateTime        @default(now())
+  signedByName         String?
+  capturedAt           DateTime? // device timestamp of completion
+  submittedAt          DateTime        @default(now()) // server receipt
+  status               EvidenceStatus  @default(SUBMITTED)
+  reviewedById         String? // admin/PM who approved or flagged
+  reviewedAt           DateTime?
+  reviewNote           String? // reason for flag / correction request
+  assets               EvidenceAsset[]
+  createdAt            DateTime        @default(now())
 
   @@index([jobId])
   @@index([taskId])
@@ -1357,19 +1447,19 @@ model FieldEvidencePackage {
 // A photo or document attached to a Field Evidence Package (R). Binary lives in
 // cloud storage; only the storage path + metadata are stored here.
 model EvidenceAsset {
-  id                String               @id @default(cuid())
-  packageId         String
-  package           FieldEvidencePackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
-  localUuid         String               @unique // client UUID; idempotent upload
-  kind              EvidenceKind         @default(PHOTO)
-  cloudStoragePath  String
-  contentType       String?
-  fileName          String?
-  sizeBytes         Int?
-  latitude          Float?
-  longitude         Float?
-  capturedAt        DateTime?
-  createdAt         DateTime             @default(now())
+  id               String               @id @default(cuid())
+  packageId        String
+  package          FieldEvidencePackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  localUuid        String               @unique // client UUID; idempotent upload
+  kind             EvidenceKind         @default(PHOTO)
+  cloudStoragePath String
+  contentType      String?
+  fileName         String?
+  sizeBytes        Int?
+  latitude         Float?
+  longitude        Float?
+  capturedAt       DateTime?
+  createdAt        DateTime             @default(now())
 
   @@index([packageId])
 }
@@ -1388,10 +1478,10 @@ enum DocWorkflowStatus {
 }
 
 enum CloseoutStatus {
-  DRAFT       // generated, not yet submitted for approval
-  SUBMITTED   // awaiting PM/admin approval
-  APPROVED    // approved; retained immutably
-  RETURNED    // returned for correction
+  DRAFT // generated, not yet submitted for approval
+  SUBMITTED // awaiting PM/admin approval
+  APPROVED // approved; retained immutably
+  RETURNED // returned for correction
 }
 
 enum CablePlacement {
@@ -1403,15 +1493,15 @@ enum CablePlacement {
 // A prime-contractor documentation workflow (e.g. "Comcast Fiber Construction
 // Closeout"). Configurable container; the actual requirements live in versions.
 model DocumentationWorkflow {
-  id                String            @id @default(cuid())
+  id                String                         @id @default(cuid())
   primeContractorId String
-  primeContractor   PrimeContractor   @relation(fields: [primeContractorId], references: [id], onDelete: Cascade)
+  primeContractor   PrimeContractor                @relation(fields: [primeContractorId], references: [id], onDelete: Cascade)
   name              String
-  workType          String?           // e.g. "Fiber Construction"
-  projectType       String?           // e.g. "FTTH", "Aerial"
-  status            DocWorkflowStatus @default(DRAFT)
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
+  workType          String? // e.g. "Fiber Construction"
+  projectType       String? // e.g. "FTTH", "Aerial"
+  status            DocWorkflowStatus              @default(DRAFT)
+  createdAt         DateTime                       @default(now())
+  updatedAt         DateTime                       @updatedAt
   versions          DocumentationWorkflowVersion[]
 
   @@index([primeContractorId])
@@ -1423,17 +1513,17 @@ model DocumentationWorkflow {
 // checklist/file-naming/invoice-gating as JSON, so new primes are added by
 // cloning + editing config -- never by changing application code.
 model DocumentationWorkflowVersion {
-  id                       String            @id @default(cuid())
-  workflowId               String
-  workflow                 DocumentationWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  version                  Int
-  status                   DocWorkflowStatus @default(DRAFT)
-  effectiveDate            DateTime?
-  expirationDate           DateTime?
-  config                   Json              // requirements config (see lib/closeout/workflow-config.ts)
-  requireCloseoutBeforeInvoice Boolean       @default(false)
-  createdAt                DateTime          @default(now())
-  jobs                     Job[]
+  id                           String                @id @default(cuid())
+  workflowId                   String
+  workflow                     DocumentationWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  version                      Int
+  status                       DocWorkflowStatus     @default(DRAFT)
+  effectiveDate                DateTime?
+  expirationDate               DateTime?
+  config                       Json // requirements config (see lib/closeout/workflow-config.ts)
+  requireCloseoutBeforeInvoice Boolean               @default(false)
+  createdAt                    DateTime              @default(now())
+  jobs                         Job[]
 
   @@unique([workflowId, version])
   @@index([workflowId])
@@ -1446,12 +1536,12 @@ model Cable {
   id             String          @id @default(cuid())
   jobId          String
   job            Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  label          String          // e.g. "Cable A", reel/segment label
+  label          String // e.g. "Cable A", reel/segment label
   fiberCount     Int             @default(0)
   cableType      String?
   reelNumber     String?
   manufacturer   String?
-  lengthValue    Float?          // ft or metre value
+  lengthValue    Float? // ft or metre value
   lengthUnit     String?         @default("FT")
   placement      CablePlacement  @default(UNKNOWN)
   createdAt      DateTime        @default(now())
@@ -1464,12 +1554,12 @@ model Cable {
 
 // One physical fiber within a cable, positioned by the standard color code.
 model FiberPosition {
-  id          String  @id @default(cuid())
+  id          String         @id @default(cuid())
   cableId     String
-  cable       Cable   @relation(fields: [cableId], references: [id], onDelete: Cascade)
-  position    Int     // 1-based fiber number
-  binderColor String  // binder/tube group color
-  fiberColor  String  // fiber color within the binder
+  cable       Cable          @relation(fields: [cableId], references: [id], onDelete: Cascade)
+  position    Int // 1-based fiber number
+  binderColor String // binder/tube group color
+  fiberColor  String // fiber color within the binder
   inMappings  FiberMapping[] @relation("InFiber")
   outMappings FiberMapping[] @relation("OutFiber")
 
@@ -1479,10 +1569,10 @@ model FiberPosition {
 
 // A splice enclosure / closure location on a job.
 model SplicePoint {
-  id          String    @id @default(cuid())
+  id          String         @id @default(cuid())
   jobId       String
-  job         Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  label       String    // Splice Point name/number
+  job         Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  label       String // Splice Point name/number
   closureType String?
   closureId   String?
   address     String?
@@ -1493,8 +1583,8 @@ model SplicePoint {
   splicer     String?
   latitude    Float?
   longitude   Float?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
   ports       Port[]
   mappings    FiberMapping[]
 
@@ -1503,13 +1593,13 @@ model SplicePoint {
 
 // A cable termination position (port) at a splice point.
 model Port {
-  id            String      @id @default(cuid())
+  id            String         @id @default(cuid())
   splicePointId String
-  splicePoint   SplicePoint @relation(fields: [splicePointId], references: [id], onDelete: Cascade)
+  splicePoint   SplicePoint    @relation(fields: [splicePointId], references: [id], onDelete: Cascade)
   portNumber    Int
   cableId       String?
-  cable         Cable?      @relation(fields: [cableId], references: [id])
-  createdAt     DateTime    @default(now())
+  cable         Cable?         @relation(fields: [cableId], references: [id])
+  createdAt     DateTime       @default(now())
   inMappings    FiberMapping[] @relation("InPort")
   outMappings   FiberMapping[] @relation("OutPort")
 
@@ -1521,20 +1611,20 @@ model Port {
 // A fiber splice: connects an incoming fiber position to an outgoing one at a
 // splice point.
 model FiberMapping {
-  id                String        @id @default(cuid())
-  splicePointId     String
-  splicePoint       SplicePoint   @relation(fields: [splicePointId], references: [id], onDelete: Cascade)
-  inPortId          String?
-  inPort            Port?         @relation("InPort", fields: [inPortId], references: [id])
-  inFiberPositionId String?
-  inFiberPosition   FiberPosition? @relation("InFiber", fields: [inFiberPositionId], references: [id])
-  outPortId         String?
-  outPort           Port?         @relation("OutPort", fields: [outPortId], references: [id])
+  id                 String         @id @default(cuid())
+  splicePointId      String
+  splicePoint        SplicePoint    @relation(fields: [splicePointId], references: [id], onDelete: Cascade)
+  inPortId           String?
+  inPort             Port?          @relation("InPort", fields: [inPortId], references: [id])
+  inFiberPositionId  String?
+  inFiberPosition    FiberPosition? @relation("InFiber", fields: [inFiberPositionId], references: [id])
+  outPortId          String?
+  outPort            Port?          @relation("OutPort", fields: [outPortId], references: [id])
   outFiberPositionId String?
-  outFiberPosition  FiberPosition? @relation("OutFiber", fields: [outFiberPositionId], references: [id])
-  spliceType        String?       // e.g. "Fusion", "Mechanical"
-  notes             String?
-  createdAt         DateTime      @default(now())
+  outFiberPosition   FiberPosition? @relation("OutFiber", fields: [outFiberPositionId], references: [id])
+  spliceType         String? // e.g. "Fusion", "Mechanical"
+  notes              String?
+  createdAt          DateTime       @default(now())
 
   @@index([splicePointId])
 }
