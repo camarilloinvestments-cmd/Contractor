@@ -76,13 +76,65 @@ services:
 
       # --- Build/version stamp (shown in the Update Center) ---
       APP_BUILD_SHA: ${APP_BUILD_SHA:-unknown}
-    ports:
-      - "${APP_PORT:-3000}:3000"
+
+      # --- Domain & SSL control plane ---
+      # Where the app writes the generated Caddyfile (shared volume the proxy
+      # reads). Overridable, but this is the in-container default.
+      CADDY_GENERATED_PATH: ${CADDY_GENERATED_PATH:-/caddy-generated/sites.caddy}
+      # Persisted canonical-URL config fragment (managed by set-app-url.mjs).
+      APP_URL_CONFIG_PATH: ${APP_URL_CONFIG_PATH:-/app/data/app-url.env}
+      # Optional public-IP override for servers behind NAT.
+      APPLIANCE_PUBLIC_IPV4: ${APPLIANCE_PUBLIC_IPV4:-}
+      APPLIANCE_PUBLIC_IPV6: ${APPLIANCE_PUBLIC_IPV6:-}
+    # NOTE: the app publishes NO host port here. Direct host access for local
+    # development is added by docker-compose.override.yml (auto-loaded by a
+    # plain `docker compose up`). In production you run:
+    #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+    # which does NOT load the override, so the app is reachable ONLY through the
+    # proxy on 80/443 and its port 3000 is never published to the host.
+    expose:
+      - "3000"
     volumes:
       # Persist runtime-writable app data (update staging/backups + locally
       # stored branding/logo) across container recreation/rebuild/restart.
       - app_data:/app/data
+      # Shared volume: the app WRITES the generated Caddyfile here; the proxy
+      # mounts the same volume read-only and picks up changes automatically.
+      - caddy_generated:/caddy-generated
+
+  # ---------------------------------------------------------------------------
+  # Reverse proxy / TLS terminator (Domain & SSL). Caddy owns ALL ACME work:
+  # Let's Encrypt issuance, certificate storage, automatic renewal, HTTP->HTTPS
+  # redirect, SNI and hot config reload. The app never speaks ACME. Certificate
+  # private keys live ONLY inside the caddy_data volume and are never exposed to
+  # the app, the database, Git, logs or the UI.
+  # ---------------------------------------------------------------------------
+  proxy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      # Base Caddyfile imports the generated per-domain config. Read-only.
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Generated per-domain config (written by the app). Read-only to proxy.
+      - caddy_generated:/caddy-generated:ro
+      # PERSISTENT: ACME account, issued certificates + private keys, renewal
+      # state. MUST survive restart/recreate/update/rebuild/reboot.
+      - caddy_data:/data
+      # PERSISTENT: Caddy's autosaved runtime config.
+      - caddy_config:/config
+    # --watch makes Caddy hot-reload when the generated config changes.
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile", "--watch"]
 
 volumes:
   db_data:
   app_data:
+  # Domain & SSL persistence (see §7/§20). NEVER deleted by the updater.
+  caddy_data:
+  caddy_config:
+  caddy_generated:

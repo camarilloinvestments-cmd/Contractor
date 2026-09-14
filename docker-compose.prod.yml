@@ -1,0 +1,36 @@
+# ---------------------------------------------------------------------------
+# PRODUCTION override for the OS1 Fiber Track Pro self-hosting stack.
+#
+# Run production with BOTH files, explicitly:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Passing an explicit -f list means docker-compose.override.yml (the local-dev
+# file that publishes port 3000) is NOT loaded, so the app container exposes
+# 3000 only on the internal compose network. Public traffic reaches the app
+# EXCLUSIVELY through the proxy service on 80/443, which terminates TLS.
+#
+# This file intentionally declares NO `ports:` for the app service. Compose
+# merges `ports` by appending, so the only reliable way to keep the app port
+# unpublished in production is to never add it here and to skip the dev
+# override (done above). Acceptance check #14 statically asserts that this
+# file maps no host port to the app.
+# ---------------------------------------------------------------------------
+services:
+  app:
+    restart: unless-stopped
+    # No host port mapping: the app is private, reachable only via `proxy`.
+    expose:
+      - "3000"
+    # Do not re-seed reference data on every production boot.
+    environment:
+      SEED_ON_START: ${SEED_ON_START:-false}
+
+  proxy:
+    restart: unless-stopped
+    # Public entrypoints. Caddy owns ACME (Let's Encrypt) issuance + renewal
+    # and HTTP->HTTPS redirect. These are the ONLY host ports open in prod.
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"

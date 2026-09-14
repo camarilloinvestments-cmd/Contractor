@@ -249,6 +249,23 @@ step "Preflight validation"
 FAIL_STAGE="preflight"
 bash "$ROOT/scripts/preflight-build.sh" || die "preflight failed"
 
+# --- Persistent-volume protection guard (Domain & SSL data safety) ----------
+# These named volumes hold state that MUST survive every upgrade: the database,
+# runtime app data, and — critically for Domain & SSL — the Caddy ACME account,
+# issued certificate private keys, renewal state, autosaved config and the
+# app-generated per-domain config. This upgrade path only ever prunes candidate
+# *images* (step 19); it never runs `docker compose down -v`, `docker volume rm`
+# or `docker volume prune`, so these volumes are preserved by construction. The
+# check below fails closed if a future edit ever introduces a destructive volume
+# operation into this script.
+PROTECTED_VOLUMES="db_data app_data caddy_data caddy_config caddy_generated"
+for _vol in $PROTECTED_VOLUMES; do
+  if ! grep -Eq "^[[:space:]]{2}${_vol}:" "$ROOT/docker-compose.yml"; then
+    die "refusing to upgrade: protected volume '${_vol}' is not declared in docker-compose.yml (would risk data loss)"
+  fi
+done
+echo "volume protection: verified ${PROTECTED_VOLUMES} declared and preserved (upgrade prunes candidate images only)"
+
 # 2. Load appliance deployment config (no secrets printed)
 step "Load appliance environment"
 FAIL_STAGE="load-env"

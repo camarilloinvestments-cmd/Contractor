@@ -1934,3 +1934,42 @@ model StatementLine {
 
   @@index([statementId])
 }
+
+// ============================================================================
+// DOMAIN & SSL (Settings → Domain & SSL)
+// ============================================================================
+// A hosted custom domain and its SSL/certificate state. Certificates are issued
+// and renewed by the dedicated Caddy reverse proxy (Let's Encrypt via ACME);
+// this table only records PUBLIC metadata and lifecycle status. No private key
+// material is ever stored here. Status fields are Strings (see the vocabularies
+// in lib/domains/index.ts) to avoid CREATE TYPE migration overhead, matching the
+// existing String-status convention used elsewhere in this schema.
+model HostedDomain {
+  id                    String    @id @default(cuid())
+  hostname              String    @unique // strictly validated FQDN, lowercased
+  displayName           String? // optional human label
+  isPrimary             Boolean   @default(false)
+  status                String    @default("PENDING") // DOMAIN_STATUS.*
+  dnsStatus             String    @default("UNKNOWN") // DNS_STATUS.*
+  resolvedIpv4          String? // comma-joined A records observed at last verify
+  resolvedIpv6          String? // comma-joined AAAA records observed at last verify
+  expectedIpv4          String? // appliance public IPv4 (override or detected)
+  expectedIpv6          String? // appliance public IPv6 (optional)
+  httpReachable         Boolean?
+  httpsReachable        Boolean?
+  sslEnabled            Boolean   @default(false)
+  sslStatus             String    @default("NONE") // SSL_STATUS.*
+  certificateIssuer     String? // e.g. "Let's Encrypt" (public)
+  certificateSerial     String? // public serial number
+  certificateNotBefore  DateTime?
+  certificateNotAfter   DateTime?
+  lastVerifiedAt        DateTime?
+  lastIssuedAt          DateTime?
+  lastRenewedAt         DateTime?
+  lastError             String? // operator-safe error string only
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([status])
+  @@index([isPrimary])
+}
