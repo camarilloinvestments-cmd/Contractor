@@ -46,9 +46,17 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
   try {
     const body = await request.json();
-    const { taskId, status, ...rest } = body ?? {};
-    const data: any = { ...rest };
-    if (status) data.status = status;
+    // Explicit allow-list (mass-assignment protection, Section E). Snapshot/
+    // financial fields (billableAmount, snapshots, jobId, invoiceItemId) are
+    // NEVER client-writable; billable/cost/profit are recomputed below.
+    const { taskId } = body ?? {};
+    const data: any = {};
+    if (body?.status !== undefined) data.status = body.status;
+    if (body?.description !== undefined) data.description = body.description;
+    if (body?.quantity !== undefined) data.quantity = body.quantity;
+    if (body?.billingRate !== undefined) data.billingRate = body.billingRate;
+    if (body?.workerPayoutRate !== undefined) data.workerPayoutRate = body.workerPayoutRate;
+    if (body?.workerId !== undefined) data.workerId = body.workerId;
 
     if (data.quantity !== undefined || data.billingRate !== undefined || data.workerPayoutRate !== undefined) {
       const existing = await prisma.task.findUnique({ where: { id: taskId } });

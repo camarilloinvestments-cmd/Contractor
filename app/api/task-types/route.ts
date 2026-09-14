@@ -34,7 +34,12 @@ export async function PUT(request: Request) {
 
   try {
     const body = await request.json();
-    const { id, ...data } = body ?? {};
+    const { id } = body ?? {};
+    // Explicit allow-list (mass-assignment protection, Section E).
+    const data: any = {};
+    if (body?.name !== undefined) data.name = body.name;
+    if (body?.description !== undefined) data.description = body.description;
+    if (body?.unitOfMeasure !== undefined) data.unitOfMeasure = body.unitOfMeasure;
     const updated = await prisma.taskType.update({ where: { id }, data });
     return NextResponse.json(updated);
   } catch (err: any) {
