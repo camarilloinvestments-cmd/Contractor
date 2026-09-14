@@ -5,6 +5,10 @@
 # Build context MUST be this directory (the folder containing package.json).
 #   docker build -t fibertrack-pro .
 # Or simply use docker-compose.yml which sets the context for you.
+#
+# SECURITY (Sections J/L): the app runs as a dedicated NON-ROOT user. Only the
+# minimal set of directories the app must write at runtime are made writable by
+# that user; all source, Prisma migrations, and bootstrap scripts stay readable.
 # ---------------------------------------------------------------------------
 FROM node:22-bookworm-slim AS app
 
@@ -43,6 +47,22 @@ RUN DATABASE_URL="postgresql://build:build@localhost:5432/build" yarn build
 # 5) Entrypoint applies the DB schema (and optionally seeds) before starting.
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# 6) SECURITY (Sections J/L): create a dedicated non-root user and grant it
+#    ONLY the runtime-writable directories it needs:
+#      - /app/data        -> update staging/backups + local branding/logo store
+#      - /app/.next/cache -> Next.js runtime image/data cache
+#    Everything else (source, prisma/migrations, scripts/db-bootstrap.mjs,
+#    scripts/bootstrap-admin.ts, node_modules, the built .next output) stays
+#    owned by root and world-readable, so it can be read/executed but NOT
+#    modified by the app process.
+RUN groupadd --system --gid 10001 app \
+    && useradd --system --uid 10001 --gid app --home-dir /app --shell /usr/sbin/nologin app \
+    && mkdir -p /app/data/updates/staging /app/data/updates/backups /app/data/branding /app/.next/cache \
+    && chown -R app:app /app/data /app/.next/cache \
+    && chmod -R u+rwX,go+rX /app/prisma /app/scripts
+
+USER app
 
 EXPOSE 3000
 ENTRYPOINT ["docker-entrypoint.sh"]

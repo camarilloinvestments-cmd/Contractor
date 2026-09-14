@@ -63,6 +63,11 @@ services:
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
     ports:
       - "${APP_PORT:-3000}:3000"
+    volumes:
+      # Persist runtime-writable app data (update staging/backups + locally
+      # stored branding/logo) across container recreation/rebuild/restart.
+      - app_data:/app/data
 
 volumes:
   db_data:
+  app_data:
