@@ -2,10 +2,12 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
+import { canManage } from '@/lib/rbac';
 
 export async function GET() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!canManage(session.user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   try {
     const [activeJobs, pendingReviews, totalJobs, recentJobs] = await Promise.all([
