@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
-import { replaceLines, type PriceLineInput } from '@/lib/price-books';
+import { createPriceBookVersion, activatePriceBookVersion, type PriceLineInput } from '@/lib/price-books';
 import { writeAudit, requestMeta } from '@/lib/audit';
 
 function canManage(role?: string | null) {
@@ -33,18 +33,30 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ error: 'Target price book is not a draft' }, { status: 400 });
     }
     const rows = (record.parsedRows as any as PriceLineInput[]) || [];
-    await replaceLines(record.priceBookId, rows);
+    // Immutable version model: approving an import creates a NEW price book
+    // version from the parsed rows and activates it. Existing versions (and any
+    // work orders pinned to them) are never mutated.
+    const version = await createPriceBookVersion(record.priceBookId, rows, {
+      createdById: session.user.id,
+      notes: `Approved from price import ${id}`,
+    });
+    await activatePriceBookVersion(version.id);
     const updated = await prisma.priceImport.update({
       where: { id },
-      data: { status: 'APPROVED', approvedById: session.user.id, approvedAt: new Date() },
+      data: {
+        status: 'APPROVED',
+        approvedById: session.user.id,
+        approvedAt: new Date(),
+        priceBookVersionId: version.id,
+      },
     });
     await writeAudit({
       actor: { id: session.user.id, email: session.user.email, role: session.user.role },
       action: 'price_import.approve', entityType: 'PriceImport', entityId: id,
-      metadata: { priceBookId: record.priceBookId, lines: rows.length, usedAi: record.usedAi },
+      metadata: { priceBookId: record.priceBookId, priceBookVersionId: version.id, version: version.version, lines: rows.length, usedAi: record.usedAi },
       ...requestMeta(req),
     });
-    return NextResponse.json({ import: updated, applied: rows.length });
+    return NextResponse.json({ import: updated, applied: rows.length, versionId: version.id, version: version.version });
   } catch (err: any) {
     console.error('Approve import error:', err?.message);
     return NextResponse.json({ error: 'Failed to approve import' }, { status: 500 });

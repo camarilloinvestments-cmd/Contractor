@@ -28,12 +28,24 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (book.status !== 'DRAFT') {
       return NextResponse.json({ error: 'Only draft books can be edited' }, { status: 400 });
     }
+    // Resolve the book's current (latest) version - lines belong to a version.
+    const currentVersion = await prisma.priceBookVersion.findFirst({
+      where: { priceBookId: id },
+      orderBy: { version: 'desc' },
+      select: { id: true, status: true },
+    });
+    if (!currentVersion) {
+      return NextResponse.json({ error: 'Price book has no version to edit' }, { status: 400 });
+    }
+    if (currentVersion.status !== 'DRAFT') {
+      return NextResponse.json({ error: 'Only draft versions can be edited' }, { status: 400 });
+    }
     const body = await req.json();
     const ratePerUnit = typeof body.ratePerUnit === 'number' ? body.ratePerUnit : dollarsToCents(parseFloat(body.rate));
     const line = await prisma.priceLine.upsert({
-      where: { priceBookId_jobCode: { priceBookId: id, jobCode: body.jobCode } },
+      where: { priceBookVersionId_jobCode: { priceBookVersionId: currentVersion.id, jobCode: body.jobCode } },
       create: {
-        priceBookId: id, jobCode: body.jobCode, description: body.description ?? '',
+        priceBookId: id, priceBookVersionId: currentVersion.id, jobCode: body.jobCode, description: body.description ?? '',
         unit: body.unit ?? '', ratePerUnit, category: body.category ?? null, notes: body.notes ?? null,
       },
       update: {

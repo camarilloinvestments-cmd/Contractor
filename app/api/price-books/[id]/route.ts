@@ -50,7 +50,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       return NextResponse.json({ error: 'Only draft books can be edited' }, { status: 400 });
     }
     const data: Record<string, unknown> = {};
-    for (const k of ['name', 'contract', 'project', 'market', 'region', 'notes']) {
+    for (const k of ['name', 'contract', 'projectLabel', 'projectId', 'market', 'region', 'notes']) {
       if (k in body) data[k] = body[k];
     }
     if ('effectiveDate' in body) data.effectiveDate = body.effectiveDate ? new Date(body.effectiveDate) : null;
