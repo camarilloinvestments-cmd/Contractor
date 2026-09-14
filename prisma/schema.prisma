@@ -482,6 +482,13 @@ model EmailSettings {
   fromName          String?
   fromEmail         String?
   replyTo           String?
+  provider          String?  @default("custom")
+  transportMode     String?  @default("STARTTLS")
+  authMethod        String?  @default("PASSWORD")
+  oauthClientId     String?
+  oauthClientSecretEncrypted String?
+  oauthRefreshTokenEncrypted String?
+  oauthTenantId     String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }

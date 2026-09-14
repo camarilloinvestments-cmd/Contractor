@@ -1,13 +1,16 @@
-// Outbound email transport (Phase 1 / v1.1.0).
+// Outbound email transport (Phase 1 / v1.1.0, extended Phase 2 / v1.2.0).
 //
-// Builds a nodemailer transport from the stored EmailSettings, decrypts the SMTP
-// password fail-closed (lib/crypto), sends the message, and records every attempt
-// in EmailLog. Sending is disabled unless EmailSettings.enabled is true and a
-// host + decryptable password are available.
+// Builds a nodemailer transport from the stored EmailSettings using the explicit
+// transport-mode abstraction (STARTTLS / IMPLICIT_TLS / NONE) and either PASSWORD
+// or OAUTH2 auth, decrypts credentials fail-closed (lib/crypto), sends the
+// message, and records every attempt in EmailLog. Sending is disabled unless
+// EmailSettings.enabled is true and a host + From address + usable credentials
+// are available. Secrets are never logged.
 import nodemailer from 'nodemailer';
 import { prisma } from '@/lib/prisma';
-import { decryptSecret, isEncryptionAvailable } from '@/lib/crypto';
-import { getEmailSettingsRaw } from './settings';
+import { getEmailSettingsRaw, decryptEmailSecrets } from './settings';
+import { buildTransport as buildTransportOptions } from './transport';
+import { categorizeEmailError } from './errors';
 
 export type SendEmailInput = {
   to: string;
@@ -25,7 +28,8 @@ export type SendEmailInput = {
 export type SendEmailResult = {
   ok: boolean;
   messageId?: string;
-  error?: string;
+  error?: string; // safe, categorized, operator-facing message
+  errorCategory?: string;
   logId?: string;
 };
 
@@ -44,30 +48,43 @@ async function buildTransport() {
   if (!settings.host || !settings.fromEmail) {
     throw new EmailNotConfiguredError('SMTP host and From address are required.');
   }
-  if (!settings.passwordEncrypted) {
-    throw new EmailNotConfiguredError('SMTP password is not set.');
-  }
-  if (!isEncryptionAvailable()) {
-    throw new EmailNotConfiguredError('APP_ENCRYPTION_KEY is not configured; cannot decrypt SMTP password.');
-  }
-  const password = decryptSecret(settings.passwordEncrypted);
-  const transport = nodemailer.createTransport({
-    host: settings.host,
-    port: settings.port ?? 587,
-    secure: !!settings.secure,
-    auth: settings.username ? { user: settings.username, pass: password } : undefined,
-  });
-  return { transport, settings };
+
+  // Decrypt secrets fail-closed (throws if key missing but ciphertext present).
+  const secrets = decryptEmailSecrets(settings);
+
+  const built = buildTransportOptions(
+    {
+      host: settings.host,
+      port: settings.port,
+      transportMode: settings.transportMode,
+      secure: settings.secure,
+      authMethod: settings.authMethod,
+      username: settings.username,
+      fromEmail: settings.fromEmail,
+      oauthClientId: settings.oauthClientId,
+      oauthTenantId: settings.oauthTenantId,
+    },
+    {
+      password: secrets.password,
+      oauthClientSecret: secrets.oauthClientSecret,
+      oauthRefreshToken: secrets.oauthRefreshToken,
+    }
+  );
+
+  const transport = nodemailer.createTransport(built.options as unknown as Parameters<typeof nodemailer.createTransport>[0]);
+  return { transport, settings, mode: built.mode, authMethod: built.authMethod };
 }
 
 // Verify SMTP connectivity without sending (used by the settings test button flow).
-export async function verifyTransport(): Promise<{ ok: boolean; error?: string }> {
+// Returns a safe categorized error message on failure (never the raw error).
+export async function verifyTransport(): Promise<{ ok: boolean; error?: string; errorCategory?: string }> {
   try {
     const { transport } = await buildTransport();
     await transport.verify();
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: (err as Error)?.message ?? 'verification failed' };
+    const cat = categorizeEmailError(err);
+    return { ok: false, error: cat.message, errorCategory: cat.category };
   }
 }
 
@@ -95,7 +112,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
   try {
     const { transport, settings } = await buildTransport();
     const fromName = settings.fromName || 'OS1 Fiber Track Pro';
-    const info = await transport.sendMail({
+    const info = (await transport.sendMail({
       from: `"${fromName}" <${settings.fromEmail}>`,
       to: input.to,
       cc: input.cc ?? undefined,
@@ -104,14 +121,14 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
       html: input.html,
       text: input.text,
       attachments: input.attachments,
-    });
+    })) as { messageId?: string };
 
     if (logId) {
       await prisma.emailLog.update({
         where: { id: logId },
         data: {
           status: 'SENT',
-          provider: 'smtp',
+          provider: settings.provider || 'smtp',
           messageId: info.messageId,
           sentAt: new Date(),
         },
@@ -119,12 +136,14 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
     }
     return { ok: true, messageId: info.messageId, logId };
   } catch (err) {
-    const message = (err as Error)?.message ?? 'send failed';
+    // Store the categorized, safe message. The raw message may contain sensitive
+    // details, so it is intentionally NOT persisted or returned to callers.
+    const cat = categorizeEmailError(err);
     if (logId) {
       await prisma.emailLog
-        .update({ where: { id: logId }, data: { status: 'FAILED', error: message } })
+        .update({ where: { id: logId }, data: { status: 'FAILED', error: cat.message } })
         .catch(() => undefined);
     }
-    return { ok: false, error: message, logId };
+    return { ok: false, error: cat.message, errorCategory: cat.category, logId };
   }
 }
