@@ -9,6 +9,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
 
   try {
+    const existing = await prisma.task.findUnique({ where: { id }, select: { workerId: true } });
+    if (!existing) return NextResponse.json({ error: 'Task not found' }, { status: 404 });
+    const isManager = session.user.role === 'ADMIN' || session.user.role === 'PROJECT_MANAGER';
+    if (!isManager && existing.workerId !== session.user.workerId) {
+      return NextResponse.json({ error: 'Forbidden: not your task' }, { status: 403 });
+    }
+
     const task = await prisma.task.update({
       where: { id },
       data: { status: 'SUBMITTED' },
