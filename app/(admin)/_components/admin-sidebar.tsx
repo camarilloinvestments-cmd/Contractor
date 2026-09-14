@@ -5,7 +5,7 @@ import { signOut } from 'next-auth/react';
 import {
   LayoutDashboard, Building2, Briefcase, Wrench, Users, FileText,
   DollarSign, BarChart3, Settings, LogOut, Cable, ChevronLeft, ChevronRight, HardHat, Coins, TrendingUp,
-  Map, Route, DownloadCloud, ClipboardCheck, TabletSmartphone
+  Map, Route, DownloadCloud, ClipboardCheck, TabletSmartphone, FileEdit, FileCheck2
 } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
@@ -14,6 +14,8 @@ import { Button } from '@/components/ui/button';
 const baseNavItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/prime-contractors', label: 'Prime Contractors', icon: Building2 },
+  { href: '/estimates', label: 'Estimates', icon: FileEdit },
+  { href: '/quotes', label: 'Quotes', icon: FileCheck2 },
   { href: '/jobs', label: 'Jobs / Work Orders', icon: Briefcase },
   { href: '/task-types', label: 'Task Types', icon: Wrench },
   { href: '/workers', label: 'Workers', icon: HardHat },
