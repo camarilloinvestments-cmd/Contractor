@@ -58,6 +58,12 @@ ROLLBACK_RESULT=""
 FAIL_STAGE=""
 FAIL_REASON=""
 MIGRATED=0
+# How the in-container recorder is reached. Starts "running" (best-effort against
+# the CURRENTLY running app image, which on a pre-0019 appliance may lack both the
+# recorder script and the new UpdateHistory columns). Switches to "candidate"
+# once migrations 0018/0019 have applied, at which point history persistence is
+# dependable because we run the recorder FROM the verified candidate image.
+RECORDER_MODE="running"
 
 json_escape() { python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1" 2>/dev/null || printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"; }
 
@@ -92,18 +98,42 @@ write_state() {
   } > "$STATE_FILE"
 }
 
+run_recorder() {
+  # Feed the host-written $STATE_FILE to record-update-history.mjs over STDIN
+  # (argument "-"), never as an in-container path: the app volume is a NAMED
+  # docker volume, not a bind mount of the host data dir, so the host state file
+  # is not visible inside the container. Before migrations we target the running
+  # app (exec); once RECORDER_MODE=candidate we run the recorder FROM the
+  # verified candidate image (a fresh `compose run --rm` that shares the same
+  # DATABASE_URL and has the migrated schema + the recorder script).
+  if [ "$RECORDER_MODE" = "candidate" ] && [ -n "$CANDIDATE_TAG" ]; then
+    CONTRACTOR_APP_IMAGE="$CANDIDATE_TAG" APP_BUILD_SHA="$TARGET_SHA" \
+      $COMPOSE run --rm -T --no-deps --entrypoint node app \
+        scripts/record-update-history.mjs - < "$STATE_FILE"
+  else
+    $COMPOSE exec -T app node scripts/record-update-history.mjs - < "$STATE_FILE"
+  fi
+}
+
 persist_history() {
-  # $1 = result enum, $2 = finishedAt (may be empty). Best-effort: never abort
-  # the upgrade because history could not be written, but surface the failure.
+  # $1 = result enum, $2 = finishedAt (may be empty). Best-effort: NEVER abort
+  # the upgrade because history could not be written. Before migrations this is
+  # expected to be a no-op on a pre-0019 appliance (older running image, older
+  # schema) — that is surfaced as a note, not a failure. After migrations the
+  # candidate env makes persistence dependable.
   local result="$1" finished="${2:-}"
   write_state "$result" "$finished"
   local out
-  if out=$($COMPOSE exec -T app node scripts/record-update-history.mjs "$STATE_FILE" 2>&1); then
+  if out=$(run_recorder 2>&1); then
     # record-update-history.mjs prints the row id on stdout (last line).
     HISTORY_ID="$(printf '%s' "$out" | tail -n 1 | tr -d '[:space:]')"
-    echo "history: persisted (id=${HISTORY_ID})"
+    echo "history: persisted (id=${HISTORY_ID}, via=${RECORDER_MODE})"
   else
-    echo "warn: could not persist UpdateHistory row: ${out}" >&2
+    if [ "$RECORDER_MODE" = "candidate" ]; then
+      echo "warn: could not persist UpdateHistory row from candidate env: ${out}" >&2
+    else
+      echo "note: pre-migration UpdateHistory persistence unavailable (pre-0019 appliance?); continuing: ${out}" >&2
+    fi
   fi
 }
 
@@ -226,7 +256,11 @@ TARGET_FULL_SHA="$(git rev-parse --verify --quiet "${RELEASE_REF}^{commit}")" \
 TARGET_SHA="${TARGET_FULL_SHA:0:12}"
 echo "target ref=$RELEASE_REF commit=$TARGET_FULL_SHA (short=$TARGET_SHA)"
 
-# 5. Snapshot current version + open history row (IN_PROGRESS)
+# 5. Snapshot current version + BEST-EFFORT early history row (IN_PROGRESS).
+# The host state file is always written locally here. The DB write is only
+# attempted against the running app and is NOT required: a pre-0019 appliance
+# has neither the recorder script nor the new schema, so this is a no-op there.
+# The dependable UpdateHistory row is created after migrations (step 15b).
 step "Snapshot current version"
 FAIL_STAGE="snapshot"
 echo "current image=$RUNNING_IMAGE_REF version=$FROM_VERSION sha=$FROM_SHA"
@@ -331,6 +365,16 @@ else
   ROLLBACK_RESULT="DB_RESTORE_REQUIRED"
   die "migration failed — DATABASE RESTORE REQUIRED from $BACKUP (restore before retrying)"
 fi
+
+# 15b. Migrations 0018/0019 are now guaranteed applied and the verified candidate
+# image (which contains record-update-history.mjs + the new schema) is available.
+# Switch the recorder to the candidate environment and persist the REAL
+# UpdateHistory row. When early persistence succeeded (appliance already >=0019)
+# HISTORY_ID is set and this UPDATES that same row; when it did not (pre-0019)
+# this CREATES the row now. All later transitions update this row.
+echo "history: switching persistence to verified candidate environment"
+RECORDER_MODE="candidate"
+persist_history "IN_PROGRESS" ""
 
 # 16. Cutover: point compose at the validated candidate and assert identity
 step "Cutover to candidate"

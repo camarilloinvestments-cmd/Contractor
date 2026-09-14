@@ -25,6 +25,15 @@
 //  15  CLI --ref parses (functional)
 //  16  CLI --channel parses/validates (functional)
 //
+// Extended (M7 final cold-review — history persistence across a named volume):
+//  17  host state file is fed to the recorder over STDIN, not an in-container path
+//  18  recorder reads state JSON from STDIN (functional)
+//  19  the dependable UpdateHistory row is created AFTER migrations, from candidate env
+//  20  early (pre-0019) history persistence is best-effort and never aborts
+//  22  a post-migration failure records FAILED from the candidate env
+//  23  the state file is secret-free
+//  24  the recorder invocation passes no secret env
+//
 // Run:  node_modules/.bin/tsx scripts/acceptance/updater-runtime-acceptance.ts
 // Exit: non-zero if any check FAILS.
 import fs from 'fs';
@@ -197,9 +206,9 @@ ok(10, 'Migrations run from the candidate image (compose run --rm candidate db-b
 // ---- 13: successful run persists UpdateHistory ---------------------------
 {
   const persistsSuccess = /persist_history "SUCCESS"/.test(upgrade)
-    && /\$COMPOSE exec -T app node scripts\/record-update-history\.mjs "\$STATE_FILE"/.test(upgrade);
+    && /record-update-history\.mjs - < "\$STATE_FILE"/.test(upgrade);
   const writesRow = /prisma\.updateHistory\.create/.test(recordSrc) && /prisma\.updateHistory\.update/.test(recordSrc);
-  ok(13, 'Successful run persists an UpdateHistory row (create/update via candidate container)', persistsSuccess && writesRow);
+  ok(13, 'Successful run persists an UpdateHistory row (create/update, fed over STDIN)', persistsSuccess && writesRow);
 }
 
 // ---- 14: secrets never printed -------------------------------------------
@@ -231,12 +240,89 @@ function runUpgrade(args: string[]) {
     badChannel.status === 2 && /must be one of stable\|rc\|beta/.test(badChannel.stderr) && channelValidated);
 }
 
+// ---- 17: host STATE_FILE is never passed as an in-container path ----------
+{
+  const noContainerPathArg = !/record-update-history\.mjs "\$STATE_FILE"/.test(upgrade);
+  const feedsStdin = /record-update-history\.mjs - < "\$STATE_FILE"/.test(upgrade);
+  // compose mounts a NAMED volume, not a bind mount of the host data dir
+  const composeNamedVolume = /app_data:\/app\/data/.test(compose)
+    && !/\.\/data:\/app\/data/.test(compose)
+    && !/\$\{?PWD\}?\/data:\/app\/data/.test(compose);
+  ok(17, 'Host state file is fed to the recorder over STDIN (-), not an in-container path (named volume, no bind mount)',
+    noContainerPathArg && feedsStdin && composeNamedVolume);
+}
+
+// ---- 18: recorder accepts state JSON over stdin (functional) --------------
+{
+  const rec = path.join(ROOT, 'scripts', 'record-update-history.mjs');
+  const empty = spawnSync(NODE, [rec, '-'], { input: '', encoding: 'utf8' });
+  const garbage = spawnSync(NODE, [rec, '-'], { input: 'not-json', encoding: 'utf8' });
+  const valid = spawnSync(NODE, [rec, '-'], {
+    input: '{"action":"INSTALL","source":"GITHUB","result":"IN_PROGRESS","startedAt":"2026-09-14T20:00:00Z"}',
+    encoding: 'utf8',
+  });
+  const emptyRejected = empty.status === 1 && /no JSON received on stdin/.test(empty.stderr);
+  const garbageRejected = garbage.status === 1 && /not valid JSON/.test(garbage.stderr);
+  // valid JSON must get PAST the stdin/parse gate and reach the DB layer
+  // (absent here) — i.e. it is NOT rejected for a stdin/parse/file reason.
+  const validParsed = !/no JSON received|not valid JSON|state file not found/.test(valid.stderr)
+    && /(failed to persist UpdateHistory|prisma)/i.test(valid.stderr + valid.stdout);
+  ok(18, 'Recorder reads state JSON from STDIN (empty rejected, bad JSON rejected, valid JSON reaches DB layer)',
+    emptyRejected && garbageRejected && validParsed);
+}
+
+// ---- 19: dependable row created AFTER migrations from candidate env -------
+{
+  const migIdx = upgrade.indexOf('migrations: COMPLETE (ran from candidate image)');
+  const switchIdx = upgrade.indexOf('RECORDER_MODE="candidate"');
+  const persistAfter = /RECORDER_MODE="candidate"\s*\npersist_history "IN_PROGRESS" ""/.test(upgrade);
+  ok(19, 'After migrations, recorder switches to candidate env and persists the real row (create-or-update)',
+    migIdx > 0 && switchIdx > migIdx && persistAfter);
+}
+
+// ---- 20: pre-0019 early persistence is best-effort (never aborts) ---------
+{
+  const fnStart = upgrade.indexOf('persist_history() {');
+  const fnEnd = upgrade.indexOf('\n}', fnStart);
+  const body = upgrade.slice(fnStart, fnEnd);
+  const noFatalInPersist = !/\b(exit|die)\b/.test(body);
+  const earlyGuarded = /persist_history "IN_PROGRESS" "" \|\| true/.test(upgrade);
+  const preMigrationNote = /pre-migration UpdateHistory persistence unavailable/.test(upgrade);
+  ok(20, 'Early (pre-0019) history persistence is best-effort and never aborts the upgrade',
+    noFatalInPersist && earlyGuarded && preMigrationNote);
+}
+
+// ---- 22: post-migration failure records FAILED via candidate env ----------
+{
+  const diePersistsFailed = /die\(\) \{[\s\S]*?persist_history "FAILED"/.test(upgrade);
+  const candidateBeforeCutover = upgrade.indexOf('RECORDER_MODE="candidate"') > 0
+    && upgrade.indexOf('RECORDER_MODE="candidate"') < upgrade.indexOf('Cutover to candidate');
+  ok(22, 'A post-migration failure records FAILED from the candidate env (die persists FAILED; candidate mode set before cutover/health)',
+    diePersistsFailed && candidateBeforeCutover);
+}
+
+// ---- 23: state file is secret-free ---------------------------------------
+{
+  const ws = upgrade.slice(upgrade.indexOf('write_state() {'), upgrade.indexOf('run_recorder() {'));
+  const leaks = /(DATABASE_URL|PASSWORD|_SECRET|PRIVATE_KEY|APP_ENCRYPTION_KEY|GITHUB_TOKEN|GH_TOKEN)/i.test(ws);
+  ok(23, 'State file (write_state) contains only secret-free fields', !leaks && ws.length > 0);
+}
+
+// ---- 24: recorder invocation passes no secret env ------------------------
+{
+  const rr = upgrade.slice(upgrade.indexOf('run_recorder() {'), upgrade.indexOf('persist_history() {'));
+  const noSecretInline = !/(DATABASE_URL|PASSWORD|_SECRET|PRIVATE_KEY|APP_ENCRYPTION_KEY|TOKEN)=/i.test(rr);
+  ok(24, 'Recorder invocation passes no secret env (only image tag + build sha) and pipes a secret-free state file',
+    noSecretInline && rr.length > 0);
+}
+
 // ---- Live-VM items (require Docker + Postgres) ----------------------------
 liveItem(1, 'Cutover identity at runtime', 'On live VM w/ Docker: after cutover, `docker inspect --format {{.Image}} $(docker compose ps -q app)` MUST equal the validated candidate image id; a mismatch STOPS.');
 liveItem(2, 'Mandatory DB backup at runtime', 'On live VM w/ Postgres: confirm a non-empty gzip pg_dump (mode 600 + .sha256) exists BEFORE migrate deploy; removing the backup path aborts the run.');
 liveItem(3, 'Migrations from candidate', 'On live VM w/ Docker: `docker compose run --rm` on the candidate image runs db-bootstrap.mjs; migration failure aborts with DATABASE RESTORE REQUIRED.');
 liveItem(4, 'Health failure rollback', 'On live VM: force /api/health to 503 post-cutover -> run marks HEALTH FAILED, holds maintenance ON, reports DATABASE RESTORE REQUIRED, and does NOT print COMPLETE.');
-liveItem(5, 'UpdateHistory persisted', 'On live VM w/ Postgres: a successful run inserts one UpdateHistory row (result=SUCCESS, from/to version+commit, backup/migration/health results, durationMs) via record-update-history.mjs.');
+liveItem(5, 'UpdateHistory persisted', 'On live VM w/ Postgres: a successful run inserts one UpdateHistory row (result=SUCCESS, from/to version+commit, backup/migration/health results, durationMs) via record-update-history.mjs fed over STDIN.');
+liveItem(6, 'Upgrade from DB baseline 0017', 'On live VM w/ Postgres seeded at migration 0017: the run completes; early history persistence is skipped without error and the real UpdateHistory row is CREATED after 0018/0019 apply (from the candidate image), then UPDATED to SUCCESS.');
 
 console.log(`\n=== Updater Runtime Acceptance: ${pass} passed, ${fail} failed, ${live} live-VM ===`);
 if (fail > 0) process.exit(1);
