@@ -1,5 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { COMCAST_CLOSEOUT_CONFIG } from '../lib/closeout/workflow-config';
 
 const prisma = new PrismaClient();
 
@@ -578,6 +579,58 @@ async function main() {
       jobId: jobFresno.id,
     },
   });
+  // -------------------------------------------------------------------------
+  // Workstream S: Comcast prime contractor + Documentation Workflow (ACTIVE v1)
+  // Layering: the Comcast-specific spreadsheet mapping lives in the workflow
+  // config, never in core logic. Cloning this workflow onto another prime needs
+  // no application code change (acceptance step 8).
+  // -------------------------------------------------------------------------
+  const comcast = await prisma.primeContractor.upsert({
+    where: { id: 'pc-comcast' },
+    update: {},
+    create: {
+      id: 'pc-comcast',
+      companyName: 'Comcast',
+      contactName: 'Construction Documentation',
+      email: 'construction@comcast.example',
+      phone: '(800) 555-0100',
+      address: '1701 JFK Blvd',
+      city: 'Philadelphia',
+      state: 'PA',
+      zip: '19103',
+    },
+  });
+
+  const comcastWorkflow = await prisma.documentationWorkflow.upsert({
+    where: { id: 'dw-comcast' },
+    update: { status: 'ACTIVE' },
+    create: {
+      id: 'dw-comcast',
+      primeContractorId: comcast.id,
+      name: 'Comcast Fiber Construction Closeout',
+      workType: 'Fiber Construction',
+      projectType: 'Aerial/Underground',
+      status: 'ACTIVE',
+    },
+  });
+
+  await prisma.documentationWorkflowVersion.upsert({
+    where: { id: 'dwv-comcast-v1' },
+    update: {
+      status: 'ACTIVE',
+      config: COMCAST_CLOSEOUT_CONFIG as unknown as Prisma.InputJsonValue,
+    },
+    create: {
+      id: 'dwv-comcast-v1',
+      workflowId: comcastWorkflow.id,
+      version: 1,
+      status: 'ACTIVE',
+      effectiveDate: new Date(),
+      requireCloseoutBeforeInvoice: true,
+      config: COMCAST_CLOSEOUT_CONFIG as unknown as Prisma.InputJsonValue,
+    },
+  });
+
   console.log('Seeding complete!');
 }
 

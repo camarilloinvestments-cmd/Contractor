@@ -39,6 +39,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'No approved tasks to invoice' }, { status: 400 });
     }
 
+    // Workstream S: per-workflow closeout gate. If a job's pinned documentation
+    // workflow version requires an approved closeout before invoicing, block
+    // until an APPROVED CloseoutRevision exists for that job.
+    const gateJobs = await prisma.job.findMany({
+      where: { id: { in: jobIds ?? [] } },
+      select: {
+        id: true,
+        jobNumber: true,
+        documentationWorkflowVersion: { select: { requireCloseoutBeforeInvoice: true } },
+        closeoutRevisions: { where: { status: 'APPROVED' }, select: { id: true }, take: 1 },
+      },
+    });
+    const blocked = gateJobs.filter(
+      (j) => j.documentationWorkflowVersion?.requireCloseoutBeforeInvoice && j.closeoutRevisions.length === 0
+    );
+    if (blocked.length > 0) {
+      return NextResponse.json(
+        {
+          error: 'Closeout required before invoicing',
+          jobs: blocked.map((j) => j.jobNumber),
+        },
+        { status: 409 }
+      );
+    }
+
     const count = await prisma.invoice.count();
     const invoiceNumber = `INV-${String(count + 1).padStart(4, '0')}`;
 
