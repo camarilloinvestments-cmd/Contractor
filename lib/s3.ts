@@ -118,3 +118,50 @@ export async function deleteFile(cloud_storage_path: string): Promise<void> {
 
   await s3.send(command);
 }
+
+// ---------------------------------------------------------------------------
+// Server-side direct object helpers (used by closeout generation, which builds
+// files in-memory on the server and must persist them without a browser
+// round-trip). These never run in client bundles.
+// ---------------------------------------------------------------------------
+
+// Upload a Buffer directly to S3 from the server and return its storage path.
+// `keyPrefix` lets callers group generated artifacts (e.g. `generated/closeout`).
+export async function uploadBuffer(
+  buffer: Buffer,
+  fileName: string,
+  contentType: string,
+  keyPrefix: string = 'generated'
+): Promise<{ cloud_storage_path: string }> {
+  const s3 = createS3Client();
+  const { bucketName, folderPrefix } = getBucketConfig();
+  const safeName = fileName.replace(/[^A-Za-z0-9._-]/g, '_');
+  const cloud_storage_path = `${folderPrefix}${keyPrefix}/${Date.now()}-${safeName}`;
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: bucketName,
+      Key: cloud_storage_path,
+      Body: buffer,
+      ContentType: contentType,
+    })
+  );
+  return { cloud_storage_path };
+}
+
+// Fetch an object's raw bytes server-side (used to bundle evidence assets into a
+// closeout ZIP). Returns null on any failure so packaging can continue.
+export async function getObjectBytes(
+  cloud_storage_path: string
+): Promise<Buffer | null> {
+  try {
+    const s3 = createS3Client();
+    const { bucketName } = getBucketConfig();
+    const res = await s3.send(
+      new GetObjectCommand({ Bucket: bucketName, Key: cloud_storage_path })
+    );
+    const bytes = await res.Body?.transformToByteArray();
+    return bytes ? Buffer.from(bytes) : null;
+  } catch {
+    return null;
+  }
+}
