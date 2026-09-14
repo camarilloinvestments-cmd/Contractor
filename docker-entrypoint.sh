@@ -5,7 +5,7 @@
 #   1. Brings the database onto the Prisma migration system and applies pending
 #      migrations (prisma migrate deploy), auto-baselining a pre-1.1.0 database
 #      that was originally created with `prisma db push`.
-#   2. Optionally seeds demo/default data (idempotent - safe to repeat).
+#   2. Optionally seeds REFERENCE/config data only, no user accounts (idempotent).
 #
 # The migration system replaced the old `prisma db push` step in v1.1.0. See
 # docs/MIGRATIONS.md for the operator runbook and rollback procedure.

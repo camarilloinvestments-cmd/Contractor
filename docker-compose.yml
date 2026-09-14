@@ -44,7 +44,7 @@ services:
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
 
       # --- First-run seeding (idempotent). Set to false after first boot if you prefer. ---
-      SEED_ON_START: ${SEED_ON_START:-true}
+      SEED_ON_START: ${SEED_ON_START:-false}
 
       # --- File storage (photos / documents). Any S3-compatible bucket. ---
       # Uploads are disabled/error out until these are provided.
