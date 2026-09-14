@@ -1267,20 +1267,26 @@ model UpdateSettings {
 }
 
 model UpdateHistory {
-  id             String       @id @default(cuid())
-  action         UpdateAction
-  source         UpdateSource @default(GITHUB)
-  fromVersion    String?
-  toVersion      String?
-  commit         String?
-  result         UpdateResult @default(PENDING)
-  rollbackResult String?
-  installedBy    String? // user email who initiated
-  message        String?
-  logs           String? // captured step-by-step log output
-  startedAt      DateTime     @default(now())
-  finishedAt     DateTime?
-  createdAt      DateTime     @default(now())
+  id               String       @id @default(cuid())
+  action           UpdateAction
+  source           UpdateSource @default(GITHUB)
+  fromVersion      String?
+  toVersion        String?
+  commit           String?
+  fromCommit       String? // short SHA before the update (history "From SHA")
+  toCommit         String? // short SHA after the update (history "To SHA")
+  result           UpdateResult @default(PENDING)
+  rollbackResult   String?
+  backupResult     String? // COMPLETE | FAILED | SKIPPED (pre-cutover backup)
+  migrationsResult String? // applied migration outcome summary
+  healthResult     String? // post-cutover health check outcome
+  durationMs       Int? // total elapsed ms (derived at write time)
+  installedBy      String? // user email who initiated
+  message          String?
+  logs             String? // captured step-by-step log output
+  startedAt        DateTime     @default(now())
+  finishedAt       DateTime?
+  createdAt        DateTime     @default(now())
 
   @@index([action, createdAt])
   @@index([result])
