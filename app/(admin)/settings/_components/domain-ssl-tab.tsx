@@ -33,6 +33,9 @@ type Domain = {
   certificateNotBefore: string | null;
   certificateNotAfter: string | null;
   lastVerifiedAt: string | null;
+  issuanceRequestedAt: string | null;
+  lastIssuedAt: string | null;
+  lastRenewedAt: string | null;
   lastError: string | null;
 };
 
@@ -64,7 +67,7 @@ export function DomainSslTab() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [publicIp, setPublicIp] = useState<{ ipv4: string | null; ipv6: string | null; source: string } | null>(null);
-  const [canonical, setCanonical] = useState<string>('');
+  const [canonical, setCanonical] = useState<{ configured?: string | null; active?: string | null; pendingRestart?: boolean; message?: string } | null>(null);
 
   // Add-domain form
   const [hostname, setHostname] = useState('');
@@ -95,7 +98,7 @@ export function DomainSslTab() {
   const loadCanonical = async () => {
     try {
       const r = await fetch('/api/system/domains/canonical-url');
-      if (r.ok) { const d = await r.json(); setCanonical(d.message || ''); }
+      if (r.ok) { const d = await r.json(); setCanonical(d); }
     } catch { /* non-fatal */ }
   };
 
@@ -241,6 +244,9 @@ export function DomainSslTab() {
               <Row label="HTTPS (443)" value={d.httpsReachable == null ? 'not checked' : d.httpsReachable ? 'reachable' : 'unreachable'} good={!!d.httpsReachable} />
               <Row label="Certificate" value={d.sslStatus} good={d.sslStatus === 'ACTIVE'} bad={['EXPIRED', 'ERROR'].includes(d.sslStatus)} />
               <Row label="Issuer" value={d.certificateIssuer || '—'} />
+              <Row label="Issuance Requested" value={fmt(d.issuanceRequestedAt)} />
+              <Row label="Issued" value={fmt(d.lastIssuedAt)} good={!!d.lastIssuedAt} />
+              <Row label="Last Renewed" value={fmt(d.lastRenewedAt)} />
               <Row label="Expires" value={fmt(d.certificateNotAfter)} />
               <Row label="Auto Renewal" value={d.sslEnabled ? 'Managed automatically' : 'off'} good={d.sslEnabled} />
               <Row label="Last Check" value={fmt(d.lastVerifiedAt)} />
@@ -260,8 +266,8 @@ export function DomainSslTab() {
                 </Button>
               ) : (
                 <>
-                  <Button size="sm" variant="outline" disabled={busyId === d.id} onClick={() => act(d.id, '/reissue', 'POST', 'Certificate reissue requested')}>
-                    <RefreshCw className="w-3.5 h-3.5 mr-1" /> Reissue Certificate
+                  <Button size="sm" variant="outline" disabled={busyId === d.id} onClick={() => act(d.id, '/reissue', 'POST', 'Certificate issuance retry requested')}>
+                    <RefreshCw className="w-3.5 h-3.5 mr-1" /> Retry Certificate Issuance
                   </Button>
                   <Button size="sm" variant="outline" disabled={busyId === d.id} onClick={() => act(d.id, '/ssl', 'DELETE', 'SSL disabled')}>
                     <ShieldAlert className="w-3.5 h-3.5 mr-1" /> Disable SSL
@@ -298,8 +304,17 @@ export function DomainSslTab() {
           <CardTitle className="flex items-center gap-2"><Lock className="w-5 h-5" /> Canonical Application URL</CardTitle>
           <CardDescription>The address used for authentication and links. Only an ACTIVE domain can become canonical; changes are backed up and can be rolled back.</CardDescription>
         </CardHeader>
-        <CardContent>
-          <pre className="text-xs font-mono bg-muted/40 rounded-md p-3 overflow-x-auto whitespace-pre-wrap">{canonical || '(unset)'}</pre>
+        <CardContent className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2 text-sm">
+            <Row label="Configured (persisted)" value={canonical?.configured || '(unset)'} good={!!canonical?.configured} />
+            <Row label="Active (serving now)" value={canonical?.active || '(unset)'} good={!!canonical?.active && canonical?.active === canonical?.configured} />
+          </div>
+          {canonical?.pendingRestart ? (
+            <Alert><Info className="w-4 h-4" /><AlertTitle>Restart required</AlertTitle><AlertDescription>A new canonical URL has been staged but is not active yet. Restart the app to activate it (the change is backed up and can be rolled back).</AlertDescription></Alert>
+          ) : null}
+          {canonical?.message ? (
+            <pre className="text-xs font-mono bg-muted/40 rounded-md p-3 overflow-x-auto whitespace-pre-wrap">{canonical.message}</pre>
+          ) : null}
         </CardContent>
       </Card>
     </div>

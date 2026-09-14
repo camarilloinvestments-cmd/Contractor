@@ -43,6 +43,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       httpReachable: domain.httpReachable,
       httpsReachable: domain.httpsReachable,
       lastVerifiedAt: domain.lastVerifiedAt,
+      // Issuance lifecycle timestamps: issuanceRequestedAt records when SSL was
+      // requested (button press); lastIssuedAt/lastRenewedAt are only set when a
+      // REAL certificate is observed (§7). A request alone never sets lastIssuedAt.
+      issuanceRequestedAt: domain.issuanceRequestedAt,
+      lastIssuedAt: domain.lastIssuedAt,
+      lastRenewedAt: domain.lastRenewedAt,
       lastError: domain.lastError,
     },
     certificate: {

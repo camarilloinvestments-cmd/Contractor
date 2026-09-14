@@ -7,6 +7,7 @@
 // reachable, certificate-serving endpoint.
 import tls from 'tls';
 import { validateHostname } from './hostname';
+import { resolveHostAddresses, isForbiddenIp } from './network';
 import { SSL_STATUS, type SslStatus, RENEWAL_WINDOW_DAYS } from './index';
 
 export type CertInfo = {
@@ -43,6 +44,20 @@ export async function inspectCertificate(hostname: string, timeoutMs = 5000): Pr
   if (!v.ok) {
     return { issuer: null, serial: null, notBefore: null, notAfter: null, status: SSL_STATUS.ERROR, error: 'invalid hostname' };
   }
+
+  // §5 SSRF hardening: resolve first, drop forbidden (private/loopback/etc.)
+  // addresses, and connect to the resolved public IP literal — keeping the
+  // hostname as the TLS servername (SNI) so the correct certificate is served
+  // and validated. This defeats DNS-rebinding to an internal endpoint.
+  const resolved = await resolveHostAddresses(v.hostname);
+  const publicAddrs = [...resolved.ipv4, ...resolved.ipv6].filter(
+    (ip) => !isForbiddenIp(ip),
+  );
+  if (publicAddrs.length === 0) {
+    return { issuer: null, serial: null, notBefore: null, notAfter: null, status: SSL_STATUS.ERROR, error: 'no public address' };
+  }
+  const target = publicAddrs[0];
+
   return new Promise((resolve) => {
     let settled = false;
     const finish = (info: CertInfo) => {
@@ -52,7 +67,7 @@ export async function inspectCertificate(hostname: string, timeoutMs = 5000): Pr
       resolve(info);
     };
     const socket = tls.connect(
-      { host: v.hostname, servername: v.hostname, port: 443, timeout: timeoutMs, rejectUnauthorized: false },
+      { host: target, servername: v.hostname, port: 443, timeout: timeoutMs, rejectUnauthorized: false },
       () => {
         const cert = socket.getPeerCertificate();
         if (!cert || Object.keys(cert).length === 0) {

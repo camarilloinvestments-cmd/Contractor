@@ -24,6 +24,21 @@ services:
       timeout: 5s
       retries: 12
 
+  # ---------------------------------------------------------------------------
+  # One-shot init: the app runs as a non-root user (UID/GID 10001). The
+  # caddy_generated volume is created root-owned on first use, so the app could
+  # not write the generated Caddyfile into it. This short-lived service runs as
+  # root ONLY to chown/chmod that shared volume, then exits. The main app never
+  # gains root. `restart: "no"` + depends_on(service_completed_successfully)
+  # ensure it runs to completion before the app starts.
+  proxy-init:
+    image: alpine:3.20
+    restart: "no"
+    user: "0:0"
+    command: ["/bin/sh", "-c", "chown -R 10001:10001 /caddy-generated && chmod 0775 /caddy-generated && echo '[proxy-init] caddy_generated ownership set to 10001:10001'"]
+    volumes:
+      - caddy_generated:/caddy-generated
+
   app:
     # The running image is pulled from this ref. A normal `docker compose up -d`
     # (or `--build`) uses contractor-app:current. scripts/os1-upgrade.sh builds a
@@ -43,6 +58,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # Ensure the shared caddy_generated volume is writable by UID 10001 before
+      # the app (which runs as that non-root user) tries to write into it.
+      proxy-init:
+        condition: service_completed_successfully
     environment:
       # --- Database (points at the db service above) ---
       DATABASE_URL: postgresql://${POSTGRES_USER:-fibertrack}:${POSTGRES_PASSWORD:-fibertrack_pw}@db:5432/${POSTGRES_DB:-fibertrack}?connect_timeout=15
@@ -86,6 +105,12 @@ services:
       # Optional public-IP override for servers behind NAT.
       APPLIANCE_PUBLIC_IPV4: ${APPLIANCE_PUBLIC_IPV4:-}
       APPLIANCE_PUBLIC_IPV6: ${APPLIANCE_PUBLIC_IPV6:-}
+      # Internal Caddy admin endpoint used for explicit, fail-closed config
+      # reloads (never published to the host). Reachable over the compose network.
+      CADDY_ADMIN_URL: ${CADDY_ADMIN_URL:-http://proxy:2019}
+      # ACME contact email (optional). Passed to the app so a regenerated config
+      # reload renders the same effective global block the proxy uses.
+      ACME_EMAIL: ${ACME_EMAIL:-}
     # NOTE: the app publishes NO host port here. Direct host access for local
     # development is added by docker-compose.override.yml (auto-loaded by a
     # plain `docker compose up`). In production you run:
@@ -114,22 +139,38 @@ services:
     restart: unless-stopped
     depends_on:
       - app
+    environment:
+      # ACME contact email for Let's Encrypt expiry notices. Optional: when unset
+      # the proxy entrypoint omits the `email` directive entirely (a bare `email`
+      # with no argument would break Caddy's caddyfile adapter at startup).
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      # Admin API bind INSIDE the container only (never published to the host).
+      CADDY_ADMIN_BIND: ${CADDY_ADMIN_BIND:-0.0.0.0:2019}
     ports:
       - "80:80"
       - "443:443"
       - "443:443/udp"
+      # NOTE: the admin port (2019) is deliberately NOT published to the host.
+      # It is reachable only over the internal compose network (http://proxy:2019)
+      # so the app can perform explicit fail-closed reloads.
     volumes:
-      # Base Caddyfile imports the generated per-domain config. Read-only.
+      # Proxy entrypoint: renders the effective Caddyfile (admin endpoint +
+      # conditional ACME email + import) then runs Caddy. Read-only.
+      - ./deploy/caddy/entrypoint.sh:/usr/local/bin/os1-proxy-entrypoint.sh:ro
+      # Base Caddyfile (reference/back-compat). The effective config is rendered
+      # by the entrypoint; this remains mounted read-only for operator reference.
       - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       # Generated per-domain config (written by the app). Read-only to proxy.
       - caddy_generated:/caddy-generated:ro
       # PERSISTENT: ACME account, issued certificates + private keys, renewal
       # state. MUST survive restart/recreate/update/rebuild/reboot.
       - caddy_data:/data
-      # PERSISTENT: Caddy's autosaved runtime config.
+      # PERSISTENT: Caddy's autosaved runtime config + rendered effective config.
       - caddy_config:/config
-    # --watch makes Caddy hot-reload when the generated config changes.
-    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile", "--watch"]
+    # Explicit reloads via the internal admin API replace the old file-watcher flag:
+    # the app validates a candidate, writes it atomically, then activates it via
+    # the admin endpoint with fail-closed rollback. No fire-and-forget reload.
+    entrypoint: ["/bin/sh", "/usr/local/bin/os1-proxy-entrypoint.sh"]
 
 volumes:
   db_data:

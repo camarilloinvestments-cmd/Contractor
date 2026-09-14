@@ -27,5 +27,35 @@ if [ "${SEED_ON_START:-false}" = "true" ]; then
   fi
 fi
 
+# ---------------------------------------------------------------------------
+# Canonical URL consumption (§3). The operator can set the app's public URL from
+# Settings -> Domain & SSL, which persists a single line to $APP_URL_CONFIG_PATH:
+#     NEXTAUTH_URL=https://<host>
+# We consume ONLY that key here, with strict validation, and export it so
+# Next.js/NextAuth pick up the canonical URL. We deliberately do NOT `source`
+# the file (that would execute arbitrary shell) and we ignore anything that is
+# not an exact, well-formed NEXTAUTH_URL=https://<host> line. NEXTAUTH_SECRET /
+# AUTH_SECRET are NEVER read from this file.
+APP_URL_CONFIG_PATH="${APP_URL_CONFIG_PATH:-/app/data/app-url.env}"
+if [ -f "$APP_URL_CONFIG_PATH" ]; then
+  # Grab the first strictly-matching line only. Host must contain a dot and use
+  # https. No spaces, no shell metacharacters are possible given this pattern.
+  _canonical_line="$(grep -E '^NEXTAUTH_URL=https://[A-Za-z0-9.-]+$' "$APP_URL_CONFIG_PATH" | head -n 1 || true)"
+  if [ -n "$_canonical_line" ]; then
+    _canonical_url="${_canonical_line#NEXTAUTH_URL=}"
+    _canonical_host="${_canonical_url#https://}"
+    # Require a dotted host (reject bare labels like https://localhost with no dot).
+    case "$_canonical_host" in
+      *.*)
+        export NEXTAUTH_URL="$_canonical_url"
+        echo "[entrypoint] Applied canonical NEXTAUTH_URL from persisted config."
+        ;;
+      *)
+        echo "[entrypoint] Ignoring malformed canonical URL host in persisted config."
+        ;;
+    esac
+  fi
+fi
+
 echo "[entrypoint] Starting application..."
 exec "$@"

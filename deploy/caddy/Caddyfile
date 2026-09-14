@@ -19,12 +19,19 @@
 #     database, returned by any API, or written to logs.
 # ===========================================================================
 
+# NOTE: At runtime the proxy container does NOT load THIS file directly. The
+# entrypoint (deploy/caddy/entrypoint.sh) renders an EFFECTIVE Caddyfile that
+# declares the internal admin endpoint and emits the global `email` directive
+# ONLY when ACME_EMAIL is set (a bare `email` with no argument breaks Caddy's
+# adapter). This committed file is kept for operator reference and back-compat.
+#
+# The global options below intentionally do NOT hardcode `email {$ACME_EMAIL}`:
+# when ACME_EMAIL is unset that expands to a bare `email` and fails startup.
 {
-	# Global options. Caddy's automatic HTTPS (ACME via Let's Encrypt) is on by
-	# default for every hostname that appears in an imported site block; issuance,
-	# OCSP stapling, HTTP->HTTPS redirect and renewal are all handled here.
-	# Set an operator contact for ACME/expiry notices via the ACME_EMAIL env var.
-	email {$ACME_EMAIL}
+        # Global options. Caddy's automatic HTTPS (ACME via Let's Encrypt) is on by
+        # default for every hostname that appears in an imported site block; issuance,
+        # OCSP stapling, HTTP->HTTPS redirect and renewal are all handled here.
+        # The ACME contact email is injected by the proxy entrypoint (only when set).
 }
 
 # Pull in every generated per-domain site block. The glob quietly matches

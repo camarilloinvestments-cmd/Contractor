@@ -1964,8 +1964,9 @@ model HostedDomain {
   certificateNotBefore  DateTime?
   certificateNotAfter   DateTime?
   lastVerifiedAt        DateTime?
-  lastIssuedAt          DateTime?
-  lastRenewedAt         DateTime?
+  issuanceRequestedAt   DateTime? // set when issuance/reissue is requested (ISSUING); NOT proof of a cert
+  lastIssuedAt          DateTime? // set only when a real valid certificate is observed
+  lastRenewedAt         DateTime? // set only when certificate serial changes vs previous
   lastError             String? // operator-safe error string only
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt

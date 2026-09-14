@@ -50,6 +50,12 @@ import {
 } from '../../lib/domains/caddy';
 import { statusFromValidity } from '../../lib/domains/cert';
 import { SSL_STATUS } from '../../lib/domains';
+import {
+  applyGeneratedConfig,
+  buildEffectiveCaddyfile,
+  tmpConfigDir,
+} from '../../lib/domains/reload';
+import { isForbiddenIp } from '../../lib/domains/network';
 
 let pass = 0;
 let fail = 0;
@@ -97,6 +103,11 @@ const composeBase = read('docker-compose.yml');
 const composeProd = read('docker-compose.prod.yml');
 const composeOverride = exists('docker-compose.override.yml') ? read('docker-compose.override.yml') : '';
 const baseCaddyfile = read('deploy/caddy/Caddyfile');
+const reloadSrc = read('lib/domains/reload.ts');
+const proxyEntrypoint = read('deploy/caddy/entrypoint.sh');
+const dockerEntrypoint = read('docker-entrypoint.sh');
+const dockerfile = read('Dockerfile');
+const applyCanonical = read('scripts/apply-canonical-url.sh');
 const diagSrc = routeSrc[`${ROUTE_DIR}/[id]/diagnostics/route.ts`] || '';
 const canonicalSrc = routeSrc[`${ROUTE_DIR}/canonical-url/route.ts`] || '';
 const uiTab = read('app/(admin)/settings/_components/domain-ssl-tab.tsx');
@@ -231,9 +242,12 @@ const uiTab = read('app/(admin)/settings/_components/domain-ssl-tab.tsx');
 {
   // Caddy performs the redirect automatically for any site with automatic TLS;
   // the base Caddyfile enables automatic HTTPS and imports generated sites.
-  const autoHttps = /import \/caddy-generated/.test(baseCaddyfile) && /email/.test(baseCaddyfile);
+  // Email moved OUT of the static base Caddyfile (empty `email` breaks startup);
+  // it is now rendered conditionally by the proxy entrypoint. Base file still
+  // imports the generated per-site blocks.
+  const autoHttps = /import \/caddy-generated/.test(baseCaddyfile) && /email/.test(proxyEntrypoint);
   const uiSurfacesRedirect = /HTTP|HTTPS|Redirect|redirect/.test(uiTab);
-  ok(103, '(support) base Caddyfile enables automatic HTTPS + imports generated sites',
+  ok(103, '(support) proxy entrypoint enables automatic HTTPS + base Caddyfile imports generated sites',
     autoHttps && uiSurfacesRedirect, `autoHttps=${autoHttps} ui=${uiSurfacesRedirect}`);
   liveItem(15, 'HTTP->HTTPS redirect is served once a certificate is active',
     'curl -I http://app.onsiteug.com returns 308 to https on the appliance');
@@ -334,6 +348,205 @@ const uiTab = read('app/(admin)/settings/_components/domain-ssl-tab.tsx');
     'run points 6-9,13,15 against app.onsiteug.com with public DNS + Docker stack; confirm LE issuance + ACTIVE');
 }
 
-console.log('');
-console.log(`=== Domain & SSL acceptance: ${pass} passed, ${fail} failed, ${live} live-VM ===`);
-if (fail > 0) process.exit(1);
+// ===========================================================================
+// Corrective-pass additions (runtime wiring: volume perms, explicit reload,
+// canonical URL lifecycle, ACME email, SSRF hardening, reissue label,
+// issuance timestamps).
+// ===========================================================================
+
+// --- 25. app container runs as a non-root user ------------------------------
+{
+  const nonRoot = /useradd[^\n]*--uid 10001/.test(dockerfile) && /^USER app\b/m.test(dockerfile);
+  ok(25, 'App image runs as a non-root user (UID 10001, USER app)', nonRoot, `dockerfile=${nonRoot}`);
+}
+
+// --- 26. fresh shared volume made writable by UID 10001 (proxy-init) --------
+{
+  const initChowns = /proxy-init:/.test(composeBase) &&
+    /chown -R 10001:10001 \/caddy-generated/.test(composeBase) &&
+    /restart:\s*"no"/.test(composeBase);
+  const appWaitsInit = /proxy-init:\s*[\s\S]*?condition:\s*service_completed_successfully/.test(composeBase);
+  ok(26, 'A fresh caddy_generated volume is chowned to 10001 by a one-shot init the app waits on',
+    initChowns && appWaitsInit, `init=${initChowns} appWaits=${appWaitsInit}`);
+}
+
+// --- 27. proxy reload is EXPLICIT (admin API), never fire-and-forget --watch -
+{
+  const explicitReload = /\/load/.test(reloadSrc) && /text\/caddyfile/.test(reloadSrc) && /caddyAdminReload/.test(reloadSrc);
+  const noWatchEntrypoint = !/--watch/.test(proxyEntrypoint);
+  const noWatchCompose = !/--watch/.test(composeBase);
+  ok(27, 'Proxy config is activated via an explicit admin-API reload, not --watch',
+    explicitReload && noWatchEntrypoint && noWatchCompose,
+    `adminApi=${explicitReload} noWatch(entrypoint)=${noWatchEntrypoint} noWatch(compose)=${noWatchCompose}`);
+}
+
+// --- 28. an invalid candidate config can never replace a working one ---------
+{
+  // The allow-list guard rejects invalid/hostile candidates BEFORE they are
+  // ever written (generate + validate happen in caddy.ts; applyGeneratedConfig
+  // only writes structurally valid text).
+  const guardRejects =
+    !validateGeneratedConfig('evil.com {\n  respond "x"\n}').ok &&
+    !generateCaddyfile([{ hostname: 'https://x.com' }]).ok;
+  const failClosedDoc = /fail-closed/i.test(reloadSrc) && /restore the previous/i.test(reloadSrc);
+  ok(28, 'An invalid candidate is rejected by the guard before it can replace a working config',
+    guardRejects && failClosedDoc, `guard=${guardRejects} failClosedDoc=${failClosedDoc}`);
+}
+
+// --- 30. Caddy admin endpoint is never published to the host ----------------
+{
+  // The admin bind (2019) appears only as an INTERNAL env default; it is never
+  // in the proxy service's published `ports:` list (only 80/443 are).
+  const publishedPorts = (composeBase.match(/^\s+-\s+"?\d+:\d+(\/udp)?"?/gm) || []).join('\n');
+  const adminNotPublished = !/2019/.test(publishedPorts);
+  const documented = /NOT published to the host/i.test(composeBase);
+  ok(30, 'The Caddy admin endpoint (2019) is internal-only, never published to the host',
+    adminNotPublished && documented, `notPublished=${adminNotPublished} documented=${documented}`);
+}
+
+// --- 31. persisted canonical URL is consumed at container startup ------------
+{
+  const consumes = /APP_URL_CONFIG_PATH/.test(dockerEntrypoint) &&
+    /NEXTAUTH_URL=https:\/\//.test(dockerEntrypoint) &&
+    /export NEXTAUTH_URL/.test(dockerEntrypoint);
+  ok(31, 'The container entrypoint reads app-url.env and exports NEXTAUTH_URL at startup',
+    consumes, `entrypoint=${consumes}`);
+}
+
+// --- 32. canonical apply => CONTROLLED activation (stage -> restart -> health)
+{
+  const stages = /set-app-url\.mjs --apply/.test(applyCanonical);
+  const restarts = /up -d --no-deps/.test(applyCanonical);
+  const healthGate = /\/api\/health/.test(applyCanonical) && /wait_healthy/.test(applyCanonical);
+  // The API/lib layer never claims ACTIVE on a mere write.
+  const noFalseActive = /pendingRestart/.test(appurlSrc) && /Restart the app to activate/i.test(appurlSrc);
+  ok(32, 'Applying a canonical URL is a controlled activation (stage, restart, health-gate; no false ACTIVE)',
+    stages && restarts && healthGate && noFalseActive,
+    `stage=${stages} restart=${restarts} health=${healthGate} noFalseActive=${noFalseActive}`);
+}
+
+// --- 33. a failed canonical activation rolls back ---------------------------
+{
+  const scriptRollback = /rollback\(\)/.test(applyCanonical) && /set-app-url\.mjs --rollback|--rollback/.test(applyCanonical);
+  const scriptSelfHeals = /did not become healthy[\s\S]*rollback|rolling back/i.test(applyCanonical);
+  const helperSelfRestore = /self-restor|rolled back/i.test(setAppUrl);
+  ok(33, 'A failed canonical activation rolls back the fragment and restarts to a healthy state',
+    scriptRollback && scriptSelfHeals && helperSelfRestore,
+    `scriptRollback=${scriptRollback} selfHeal=${scriptSelfHeals} helper=${helperSelfRestore}`);
+}
+
+// --- 34. ACME_EMAIL unset does not break the proxy --------------------------
+{
+  const noEmail = buildEffectiveCaddyfile({ acmeEmail: '' });
+  const withEmail = buildEffectiveCaddyfile({ acmeEmail: 'ops@example.com' });
+  const omitsWhenEmpty = !/\bemail\b/.test(noEmail) && /admin /.test(noEmail);
+  const includesWhenSet = /email ops@example\.com/.test(withEmail);
+  const entrypointConditional = /if \[ -n "\$\{ACME_EMAIL:-\}" \]/.test(proxyEntrypoint);
+  ok(34, 'ACME_EMAIL unset never emits an empty email directive (proxy still starts); set => included',
+    omitsWhenEmpty && includesWhenSet && entrypointConditional,
+    `omitsEmpty=${omitsWhenEmpty} includesSet=${includesWhenSet} entrypoint=${entrypointConditional}`);
+}
+
+// --- 35. private/loopback/link-local/ULA addresses are never probed ----------
+{
+  const forbidden = [
+    '127.0.0.1', '10.0.0.5', '192.168.1.10', '172.16.0.1', '169.254.1.1',
+    '100.64.0.1', '0.0.0.0', '::1', '::', 'fc00::1', 'fd12::1', 'fe80::1', 'ff02::1',
+  ];
+  const allForbidden = forbidden.every((ip) => isForbiddenIp(ip));
+  const publicAllowed = !isForbiddenIp('203.0.113.10') && !isForbiddenIp('8.8.8.8');
+  ok(35, 'Private/loopback/link-local/CGNAT/ULA/multicast addresses are classified forbidden (never probed)',
+    allForbidden && publicAllowed, `forbidden=${allForbidden} publicAllowed=${publicAllowed}`);
+}
+
+// --- 36. a DNS mismatch is never probed -------------------------------------
+{
+  // The verify path pins expectedIp: the host must actually resolve to it or the
+  // probe is refused (no connection attempt).
+  const pinsExpected = /publicAddrs\.includes\(expectedIp\)/.test(networkSrc) &&
+    /if \(!publicAddrs\.includes\(expectedIp\)\) return false/.test(networkSrc);
+  const verifyPassesExpected = /checkPort\([^)]*expectedIp/.test(serviceSrc);
+  ok(36, 'A domain that does not resolve to the appliance IP is never probed (expectedIp pin)',
+    pinsExpected && verifyPassesExpected, `pin=${pinsExpected} wired=${verifyPassesExpected}`);
+}
+
+// --- 37. only a verified public IP is the connect target --------------------
+{
+  const resolvesFirst = /resolveHostAddresses\(/.test(networkSrc);
+  const filtersForbidden = /filter\([\s\S]*isForbiddenIp/.test(networkSrc);
+  const connectsToLiteral = /socket\.connect\(port, target\)/.test(networkSrc);
+  const certResolves = /resolveHostAddresses/.test(certSrc) && /isForbiddenIp/.test(certSrc);
+  ok(37, 'Probes/cert inspection resolve + drop forbidden IPs and connect to the resolved public literal only',
+    resolvesFirst && filtersForbidden && connectsToLiteral && certResolves,
+    `resolve=${resolvesFirst} filter=${filtersForbidden} literal=${connectsToLiteral} cert=${certResolves}`);
+}
+
+// --- 38. Reissue button label matches actual behaviour ----------------------
+{
+  const label = /Retry Certificate Issuance/.test(uiTab) && !/Reissue Certificate\b/.test(uiTab);
+  const routeStable = exists(`${ROUTE_DIR}/[id]/reissue/route.ts`);
+  ok(38, 'The reissue control is labelled "Retry Certificate Issuance" (matches request-only behaviour); route path unchanged',
+    label && routeStable, `label=${label} routeStable=${routeStable}`);
+}
+
+// --- 39. lastIssuedAt / lastRenewedAt require a REAL observed certificate ----
+{
+  // enableSsl + reissue set issuanceRequestedAt only.
+  const requestOnly = /data:\s*\{ issuanceRequestedAt: new Date\(\) \}/.test(serviceSrc);
+  // lastIssuedAt / lastRenewedAt are only assigned inside the certObserved branch.
+  const certGated = /certObserved\s*=/.test(serviceSrc) &&
+    /if \(certObserved\)/.test(serviceSrc) &&
+    /timestampData\.lastIssuedAt/.test(serviceSrc) &&
+    /timestampData\.lastRenewedAt/.test(serviceSrc);
+  // The UI distinguishes "Issuance Requested" from "Issued".
+  const uiDistinguishes = /Issuance Requested/.test(uiTab) && /label="Issued"/.test(uiTab);
+  ok(39, 'lastIssuedAt/lastRenewedAt are set only when a real cert is observed; a request only records issuanceRequestedAt',
+    requestOnly && certGated && uiDistinguishes,
+    `requestOnly=${requestOnly} certGated=${certGated} ui=${uiDistinguishes}`);
+}
+
+// --- 40. caddy_generated is a named, protected persistent volume -------------
+{
+  const named = /^\s{2}caddy_generated:/m.test(composeBase) && /caddy_generated:\/caddy-generated/.test(composeBase);
+  const protectedInUpgrade = /PROTECTED_VOLUMES="[^"]*caddy_generated/.test(upgrade);
+  ok(40, 'caddy_generated is a named persistent volume and is in the updater protected set (survives recreation)',
+    named && protectedInUpgrade, `named=${named} protected=${protectedInUpgrade}`);
+}
+
+// --- 41/42/43. live-only confirmations --------------------------------------
+liveItem(41, 'A freshly-created caddy_generated volume is actually writable by UID 10001',
+  'bring up the stack on the appliance; confirm the app writes sites.caddy without EACCES');
+liveItem(42, 'Canonical URL activation performs a real restart + health gate (+ rollback on failure)',
+  'run scripts/apply-canonical-url.sh app.onsiteug.com on the appliance; confirm health + rollback path');
+liveItem(43, 'lastIssuedAt is populated only after real Let\u2019s Encrypt issuance',
+  'issue on app.onsiteug.com; confirm issuanceRequestedAt precedes lastIssuedAt, set only when the cert is live');
+
+// --- 29. reload failure restores the previous on-disk config (async I/O) ----
+(async () => {
+  const dir = path.join(tmpConfigDir(), `acc-${process.pid}-${Date.now()}`);
+  const target = path.join(dir, 'sites.caddy');
+  await fs.promises.mkdir(dir, { recursive: true });
+  const good = 'app.onsiteug.com {\n\treverse_proxy app:3000\n}\n';
+  await fs.promises.writeFile(target, good, 'utf8');
+  // Attempt an apply whose reload FAILS; a fake admin URL forces the reload path.
+  const res = await applyGeneratedConfig({
+    targetPath: target,
+    candidate: 'app.onsiteug.com {\n\treverse_proxy app:3000\n\t# changed\n}\n',
+    adminUrl: 'http://127.0.0.1:0',
+    reloadFn: async () => ({ ok: false, reason: 'simulated reload failure' }),
+  });
+  const onDisk = await fs.promises.readFile(target, 'utf8');
+  const restored = res.ok === false && onDisk === good;
+  ok(29, 'A failed reload atomically restores the previous on-disk config (fail-closed)',
+    restored, `applyFailed=${res.ok === false} previousRestored=${onDisk === good}`);
+  await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
+})()
+  .catch((e) => {
+    fail++;
+    console.log(`FAIL  29. reload-failure restore threw \u2014 ${e?.message ?? e}`);
+  })
+  .finally(() => {
+    console.log('');
+    console.log(`=== Domain & SSL acceptance: ${pass} passed, ${fail} failed, ${live} live-VM ===`);
+    if (fail > 0) process.exit(1);
+  });

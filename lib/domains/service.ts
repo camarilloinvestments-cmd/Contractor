@@ -22,6 +22,7 @@ import {
   validateGeneratedConfig,
   GENERATED_CADDYFILE_PATH,
 } from './caddy';
+import { applyGeneratedConfig } from './reload';
 import {
   DOMAIN_STATUS,
   DNS_STATUS,
@@ -29,8 +30,6 @@ import {
   DOMAIN_ERROR,
   RATE_LIMITS,
 } from './index';
-import { promises as fs } from 'fs';
-import path from 'path';
 
 export type ServiceResult<T = unknown> = {
   ok: boolean;
@@ -99,18 +98,32 @@ export async function regenerateProxyConfig(): Promise<ServiceResult<{ hostnames
   const valid = validateGeneratedConfig(gen.caddyfile);
   if (!valid.ok) return { ok: false, error: DOMAIN_ERROR.PROXY_CONFIG_INVALID };
 
-  try {
-    await writeProxyConfig(gen.caddyfile);
-  } catch {
+  const applied = await applyGeneratedConfig({
+    targetPath: GENERATED_CADDYFILE_PATH,
+    candidate: gen.caddyfile,
+    acmeEmail: process.env.ACME_EMAIL || null,
+  });
+  if (!applied.ok) {
     return { ok: false, error: DOMAIN_ERROR.PROXY_RELOAD_FAILED };
   }
   return { ok: true, data: { hostnames: gen.hostnames } };
 }
 
+/**
+ * Write a proxy config with the same fail-closed activation semantics as the
+ * site config path. Used for the empty (no SSL-enabled domains) config so it,
+ * too, is atomically written and (when an admin endpoint is configured) live
+ * reloaded rather than fire-and-forget.
+ */
 async function writeProxyConfig(contents: string): Promise<void> {
-  const target = GENERATED_CADDYFILE_PATH;
-  await fs.mkdir(path.dirname(target), { recursive: true });
-  await fs.writeFile(target, contents, { encoding: 'utf8', mode: 0o644 });
+  const applied = await applyGeneratedConfig({
+    targetPath: GENERATED_CADDYFILE_PATH,
+    candidate: contents,
+    acmeEmail: process.env.ACME_EMAIL || null,
+  });
+  if (!applied.ok) {
+    throw new Error(applied.reason);
+  }
 }
 
 // ---- Verify -----------------------------------------------------------------
@@ -142,9 +155,11 @@ export async function verifyDomain(id: string): Promise<ServiceResult> {
   const dnsRes = await resolveDomain(v.hostname, { ipv4: expectedIpv4, ipv6: expectedIpv6 });
 
   // Port reachability (LIVE-VM meaningful only where 80/443 route here).
+  // SSRF-hardened: require the hostname to resolve to the expected appliance
+  // IPv4 and connect to that resolved literal only (§5).
   const [http, https] = await Promise.all([
-    checkPort(v.hostname, 80),
-    checkPort(v.hostname, 443),
+    checkPort(v.hostname, 80, { expectedIp: expectedIpv4 }),
+    checkPort(v.hostname, 443, { expectedIp: expectedIpv4 }),
   ]);
 
   let status: string = DOMAIN_STATUS.READY;
@@ -212,9 +227,12 @@ export async function enableSsl(id: string): Promise<ServiceResult> {
     return { ok: false, error: proxy.error };
   }
 
+  // Mark WHEN issuance was requested. This is NOT proof a certificate exists —
+  // lastIssuedAt is set only when a real valid cert is later observed by
+  // refreshCertificate (§7).
   const updated = await prisma.hostedDomain.update({
     where: { id },
-    data: { lastIssuedAt: new Date() },
+    data: { issuanceRequestedAt: new Date() },
   });
   return { ok: true, data: updated };
 }
@@ -243,9 +261,10 @@ export async function reissue(id: string): Promise<ServiceResult> {
     return { ok: false, error: proxy.error };
   }
 
+  // Retry requested — record the request time only, never lastIssuedAt (§7).
   const updated = await prisma.hostedDomain.update({
     where: { id },
-    data: { lastIssuedAt: new Date() },
+    data: { issuanceRequestedAt: new Date() },
   });
   return { ok: true, data: updated };
 }
@@ -275,6 +294,34 @@ export async function refreshCertificate(id: string): Promise<ServiceResult> {
           ? DOMAIN_STATUS.CERT_ERROR
           : domain.status;
 
+  // §7: lastIssuedAt / lastRenewedAt are set ONLY here, when a REAL valid
+  // certificate has actually been observed on the wire — never on a mere config
+  // write. A cert counts as "observed" when it is currently ACTIVE or
+  // RENEWAL_DUE (both mean a genuine, not-yet-expired cert is being served).
+  const certObserved =
+    sslStatus === SSL_STATUS.ACTIVE || sslStatus === SSL_STATUS.RENEWAL_DUE;
+  const serialChanged =
+    certObserved &&
+    !!info.serial &&
+    info.serial !== domain.certificateSerial;
+
+  const timestampData: {
+    lastIssuedAt?: Date;
+    lastRenewedAt?: Date;
+  } = {};
+  if (certObserved) {
+    // First time we see a valid cert (no prior lastIssuedAt) => record issuance.
+    if (!domain.lastIssuedAt) {
+      timestampData.lastIssuedAt = info.notBefore ?? new Date();
+    }
+    // Serial changed vs the last one we recorded => a renewal happened.
+    if (serialChanged) {
+      timestampData.lastRenewedAt = new Date();
+      // A renewal also (re)establishes issuance time from the new cert.
+      timestampData.lastIssuedAt = info.notBefore ?? new Date();
+    }
+  }
+
   const updated = await prisma.hostedDomain.update({
     where: { id },
     data: {
@@ -285,6 +332,7 @@ export async function refreshCertificate(id: string): Promise<ServiceResult> {
       sslStatus,
       status,
       httpsReachable: true,
+      ...timestampData,
       lastError: sslStatus === SSL_STATUS.EXPIRED ? DOMAIN_ERROR.CERT_EXPIRED : null,
     },
   });
