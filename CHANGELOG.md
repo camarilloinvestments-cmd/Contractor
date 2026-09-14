@@ -169,6 +169,56 @@ preserved, new tables created empty, zero schema drift).
 - Added `leaflet` / `react-leaflet` (+ `@types/leaflet`) for the interactive map;
   map components are loaded client-side only (no SSR) with OpenStreetMap tiles.
 
+### Workstreams S/T/U — System Update Center (this increment)
+
+- **S — In-app System Update Center.** New **System → System Updates** page
+  (Admin only) that surfaces the current running version, the configured release
+  channel, the last check/download/install results, and the full update history.
+  From it an admin can **Check for updates**, **Download** a release package,
+  **Install** it, **Roll back** to the previous snapshot, **Upload** a package
+  manually (air-gapped installs), **Retry** a failed step, view release notes,
+  and toggle **maintenance mode**. All actions are ADMIN-only, `force-dynamic`,
+  and written to the global audit trail (`system.update_*`).
+- **T — GitHub release source.** Updates are pulled from the project's **private**
+  GitHub repository releases via the official GitHub REST API
+  (`api.github.com`, `2022-11-28`). The **personal access token is stored
+  server-side, encrypted at rest via `lib/crypto`, never returned to the browser
+  and never logged** (the status API returns only a `hasToken` boolean). Release
+  assets are downloaded with a `Bearer` token and
+  `Accept: application/octet-stream` so **private** release assets download
+  correctly. A channel filter (`STABLE` / `RC` / `BETA`) and semantic-version
+  comparison decide what counts as "newer than current". A **Manual** source lets
+  operators upload a package directly when the host has no outbound GitHub access.
+- **U — Verified, safe install with rollback.** The updater **never installs an
+  unverified package**: every downloaded or uploaded package is checked against a
+  signed **manifest** — a SHA-256 checksum (constant-time compare) is **always**
+  enforced, and an **RSA-SHA256 / ed25519 signature** is enforced whenever a
+  public key is configured or `requireSignature` is set. Unverified downloads are
+  deleted; manual uploads run through the **same** verification path. Install runs
+  a **preflight** (DB connectivity, newer-than-current, minimum-supported-version)
+  and writes a non-secret **install plan** for the host installer.
+  - **Architecture (honest self-hosted design).** A containerized Node app
+    cannot safely swap its own image or restart itself, so the in-app control
+    plane handles settings, check, download, verification, preflight, history,
+    the maintenance flag and the install plan; a host-level script
+    (`scripts/install-update.sh`) performs the actual stage → DB backup →
+    snapshot → rebuild → migrate → health-check, with **automatic rollback** on
+    any failure. This boundary is stated in the UI and documented in
+    `docs/UPDATES.md`.
+
+#### Release packaging (S/T/U)
+- New ops scripts: `scripts/build-release.sh` (git-archive tarball +
+  `release-notes.md` + signed `manifest.json` + `SHA256SUMS`),
+  `scripts/release/make-manifest.mjs` (builds & signs the manifest; its
+  canonicalization matches `lib/updates/manifest.ts` byte-for-byte), and
+  `scripts/install-update.sh` (host-level safe installer / `--rollback`).
+
+#### Database & migrations (S/T/U)
+- Additive migration `0010_update_center`. New enums `ReleaseChannel`,
+  `UpdateAction`, `UpdateResult`, `UpdateSource`; new tables `UpdateSettings`
+  (singleton) and `UpdateHistory`. All additive — no destructive change; zero
+  schema drift verified.
+
 ---
 ---
 

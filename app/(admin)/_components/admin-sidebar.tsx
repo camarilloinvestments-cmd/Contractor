@@ -5,7 +5,7 @@ import { signOut } from 'next-auth/react';
 import {
   LayoutDashboard, Building2, Briefcase, Wrench, Users, FileText,
   DollarSign, BarChart3, Settings, LogOut, Cable, ChevronLeft, ChevronRight, HardHat, Coins, TrendingUp,
-  Map, Route
+  Map, Route, DownloadCloud
 } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
@@ -31,6 +31,7 @@ const managerNavItems = [
 ];
 
 const adminNavItems = [
+  { href: '/system/updates', label: 'System Updates', icon: DownloadCloud },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 

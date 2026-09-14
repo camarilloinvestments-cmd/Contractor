@@ -1085,3 +1085,82 @@ model GeoEvent {
   @@index([vehicleId, occurredAt])
   @@index([workerId, occurredAt])
 }
+
+// ============================================================================
+// Increment 9 (v1.2.0): System Update Center + GitHub release packages + safe install
+// Workstreams S / T / U. All additive.
+// ============================================================================
+
+enum ReleaseChannel {
+  STABLE
+  RC
+  BETA
+}
+
+enum UpdateAction {
+  CHECK
+  DOWNLOAD
+  INSTALL
+  ROLLBACK
+  UPLOAD
+  RETRY
+}
+
+enum UpdateResult {
+  PENDING
+  IN_PROGRESS
+  SUCCESS
+  FAILED
+  ROLLED_BACK
+}
+
+enum UpdateSource {
+  GITHUB
+  MANUAL
+}
+
+model UpdateSettings {
+  id                     String         @id @default("default")
+  releaseChannel         ReleaseChannel @default(RC)
+  githubOwner            String? // GitHub org/user (source of truth)
+  githubRepo             String? // GitHub repository name (supports PRIVATE repos)
+  githubTokenEncrypted   String? // PAT for private release access (encrypted at rest)
+  autoCheck              Boolean        @default(false)
+  publicKeyPem           String? // PEM public key for package signature verification
+  requireSignature       Boolean        @default(false)
+  maintenanceMode        Boolean        @default(false)
+  latestVersion          String?
+  latestReleaseAt        DateTime?
+  latestCommit           String?
+  latestPackageBytes     Int?
+  latestReleaseNotes     String?
+  latestAssetName        String?
+  latestAssetSha256      String?
+  lastCheckAt            DateTime?
+  lastCheckStatus        String? // OK | FAILED | UNTESTED
+  lastCheckError         String?
+  lastSuccessfulUpdateAt DateTime?
+  lastFailedUpdateAt     DateTime?
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+}
+
+model UpdateHistory {
+  id             String       @id @default(cuid())
+  action         UpdateAction
+  source         UpdateSource @default(GITHUB)
+  fromVersion    String?
+  toVersion      String?
+  commit         String?
+  result         UpdateResult @default(PENDING)
+  rollbackResult String?
+  installedBy    String? // user email who initiated
+  message        String?
+  logs           String? // captured step-by-step log output
+  startedAt      DateTime     @default(now())
+  finishedAt     DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@index([action, createdAt])
+  @@index([result])
+}
