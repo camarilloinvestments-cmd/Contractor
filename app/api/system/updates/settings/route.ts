@@ -23,9 +23,13 @@ export async function PUT(req: Request) {
     githubOwner: typeof body.githubOwner === 'string' ? body.githubOwner.trim() || null : null,
     githubRepo: typeof body.githubRepo === 'string' ? body.githubRepo.trim() || null : null,
     autoCheck: !!body.autoCheck,
-    requireSignature: !!body.requireSignature,
+    // Signature policy is pinned/bundled and enforced by default; only update the
+    // DB flag when explicitly provided so the operator UI (which no longer exposes
+    // an easy toggle) never clobbers it to false by omission.
+    requireSignature: typeof body.requireSignature === 'boolean' ? body.requireSignature : undefined,
     publicKeyPem: typeof body.publicKeyPem === 'string' ? body.publicKeyPem.trim() || null : undefined,
   };
+  if (data.requireSignature === undefined) delete data.requireSignature;
   if (data.publicKeyPem === undefined) delete data.publicKeyPem;
 
   // Only (re)encrypt the token when a new value is supplied; support explicit clear.
