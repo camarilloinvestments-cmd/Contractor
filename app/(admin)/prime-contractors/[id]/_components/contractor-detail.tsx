@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Building2, Save, Plus, Trash2, ArrowLeft, BookOpen } from 'lucide-react';
+import { Building2, Save, Plus, Trash2, ArrowLeft, BookOpen, FolderKanban } from 'lucide-react';
 import { StatusBadge } from '@/components/status-badge';
 import { formatCents, dollarsToCents, formatCentsToNumber } from '@/lib/utils/format';
 import Link from 'next/link';
@@ -71,6 +71,9 @@ export function ContractorDetail({ id }: { id: string }) {
             <h1 className="text-2xl font-display font-bold tracking-tight">{contractor?.companyName ?? ''}</h1>
             <p className="text-muted-foreground">Prime Contractor Details &amp; Rate Card</p>
           </div>
+          <Link href={`/prime-contractors/${id}/projects`}>
+            <Button variant="outline"><FolderKanban className="w-4 h-4 mr-2" />Projects</Button>
+          </Link>
           <Link href={`/prime-contractors/${id}/price-books`}>
             <Button variant="outline"><BookOpen className="w-4 h-4 mr-2" />Price Books</Button>
           </Link>
