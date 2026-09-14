@@ -10,13 +10,14 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 
-export type CounterKey = 'ESTIMATE' | 'QUOTE' | 'INVOICE' | 'WORKORDER';
+export type CounterKey = 'ESTIMATE' | 'QUOTE' | 'INVOICE' | 'WORKORDER' | 'STATEMENT';
 
 const DEFAULTS: Record<CounterKey, { prefix: string; padding: number }> = {
   ESTIMATE: { prefix: 'EST', padding: 5 },
   QUOTE: { prefix: 'Q', padding: 5 },
   INVOICE: { prefix: 'INV', padding: 5 },
   WORKORDER: { prefix: 'WO', padding: 5 },
+  STATEMENT: { prefix: 'STAT', padding: 5 },
 };
 
 type Tx = Prisma.TransactionClient | PrismaClient;

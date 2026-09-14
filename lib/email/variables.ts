@@ -49,6 +49,36 @@ export function invoiceVariables(invoice: InvoiceForVars): TemplateVariables {
   };
 }
 
+type StatementForVars = {
+  statementNumber?: string | null;
+  statementDate?: Date | string | null;
+  periodStart?: Date | string | null;
+  periodEnd?: Date | string | null;
+  endingBalance?: number | null;
+  primeContractor?: PrimeForVars;
+  project?: { projectName?: string | null; projectCode?: string | null } | null;
+};
+
+export function statementVariables(statement: StatementForVars): TemplateVariables {
+  const pc = statement.primeContractor ?? undefined;
+  const balance = formatCents(statement.endingBalance ?? 0);
+  return {
+    document_number: statement.statementNumber ?? '',
+    statement_number: statement.statementNumber ?? '',
+    statement_date: fmtDate(statement.statementDate),
+    period_start: fmtDate(statement.periodStart),
+    period_end: fmtDate(statement.periodEnd),
+    statement_total: balance,
+    statement_balance: balance,
+    document_total: balance,
+    prime_contractor_name: pc?.companyName ?? '',
+    customer_name: pc?.contactName ?? pc?.companyName ?? '',
+    contact_name: pc?.contactName ?? '',
+    customer_email: pc?.email ?? '',
+    project_name: statement.project?.projectName ?? statement.project?.projectCode ?? '',
+  };
+}
+
 export function mergeVariables(...parts: TemplateVariables[]): TemplateVariables {
   return Object.assign({}, ...parts);
 }

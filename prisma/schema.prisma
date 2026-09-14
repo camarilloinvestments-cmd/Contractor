@@ -198,6 +198,7 @@ model PrimeContractor {
   projects               Project[]
   estimates              Estimate[]
   quotes                 Quote[]
+  statements             Statement[]
 }
 
 model TaskType {
@@ -584,6 +585,7 @@ model Project {
   jobs                      Job[]
   estimates                 Estimate[]
   quotes                    Quote[]
+  statements                Statement[]
 
   @@unique([primeContractorId, projectCode])
   @@index([primeContractorId])
@@ -1859,4 +1861,70 @@ model DocumentSend {
 
   @@index([documentType, documentId])
   @@index([createdAt])
+}
+
+// ============================================================
+// Statements — first-class customer account statement module.
+// A Statement summarises a Prime (optionally a single Project) over a period:
+// opening balance, invoices issued, payments/credits received, ending balance,
+// and aging buckets. Customer-facing ONLY — never carries payout/cost/margin/
+// commission/internal-note data (redaction by construction).
+// ============================================================
+enum StatementStatus {
+  DRAFT
+  SENT
+}
+
+model Statement {
+  id                String          @id @default(cuid())
+  statementNumber   String          @unique
+  primeContractorId String
+  projectId         String?
+  status            StatementStatus @default(DRAFT)
+  statementDate     DateTime        @default(now())
+  periodStart       DateTime
+  periodEnd         DateTime
+  openingBalance    Int             @default(0) // cents
+  invoicedAmount    Int             @default(0) // cents; invoices issued in period
+  paymentsAmount    Int             @default(0) // cents; payments/credits in period
+  endingBalance     Int             @default(0) // cents
+  agingCurrent      Int             @default(0) // cents; not yet due
+  aging1To30        Int             @default(0) // cents
+  aging31To60       Int             @default(0) // cents
+  aging61To90       Int             @default(0) // cents
+  aging91Plus       Int             @default(0) // cents
+  notes             String? // customer-facing statement notes (safe to render)
+  currentRevision   Int             @default(0)
+  lastEmailedAt     DateTime?
+  emailCount        Int             @default(0)
+  createdById       String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  primeContractor   PrimeContractor @relation(fields: [primeContractorId], references: [id])
+  project           Project?        @relation(fields: [projectId], references: [id])
+  lines             StatementLine[]
+
+  @@index([primeContractorId])
+  @@index([projectId])
+  @@index([status])
+}
+
+// One ledger row on a statement. lineType distinguishes opening balance, an
+// invoice charge, or a payment/credit. charges/credits are cents; balance is the
+// running balance after this row. No cost/payout/margin fields exist here.
+model StatementLine {
+  id          String    @id @default(cuid())
+  statementId String
+  lineType    String // OPENING | INVOICE | PAYMENT
+  refId       String? // invoice/payment id (provenance)
+  refNumber   String? // invoice number / payment reference (customer-facing)
+  date        DateTime
+  description String
+  charges     Int       @default(0) // cents
+  credits     Int       @default(0) // cents
+  balance     Int       @default(0) // cents; running balance after this row
+  sortOrder   Int       @default(0)
+  statement   Statement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+
+  @@index([statementId])
 }

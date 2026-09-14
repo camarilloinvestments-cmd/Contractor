@@ -20,6 +20,7 @@ export const TEMPLATE_KEYS = {
   ESTIMATE_NEW: 'estimate_new',
   QUOTE_NEW: 'quote_new',
   QUOTE_ACCEPTED: 'quote_accepted',
+  STATEMENT_NEW: 'statement_new',
   TEST: 'test_email',
 } as const;
 
@@ -121,6 +122,27 @@ Thank you — quote {{quote_number}} for {{quote_total}} has been accepted.
 We will proceed with the next steps for project {{project_name}}. Questions? Reach us at {{support_email}} or {{support_phone}}.
 
 {{company_name}}`,
+  },
+  {
+    key: TEMPLATE_KEYS.STATEMENT_NEW,
+    name: 'New Statement',
+    subject: 'Statement {{statement_number}} from {{company_name}}',
+    bodyHtml: `<p>Dear {{contact_name}},</p>
+<p>Please find attached account statement <strong>{{statement_number}}</strong> dated {{statement_date}} for the period {{period_start}} to {{period_end}}.</p>
+<p>Balance due: <strong>{{statement_balance}}</strong></p>
+<p>If you have any questions about this statement, contact us at {{support_email}} or {{support_phone}}.</p>
+<p>Thank you for your business,<br/>{{company_name}}<br/>{{company_website}}</p>`,
+    bodyText: `Dear {{contact_name}},
+
+Please find attached account statement {{statement_number}} dated {{statement_date}} for the period {{period_start}} to {{period_end}}.
+
+Balance due: {{statement_balance}}
+
+If you have any questions about this statement, contact us at {{support_email}} or {{support_phone}}.
+
+Thank you for your business,
+{{company_name}}
+{{company_website}}`,
   },
   {
     key: TEMPLATE_KEYS.TEST,

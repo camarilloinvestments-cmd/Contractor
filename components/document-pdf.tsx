@@ -215,3 +215,137 @@ export function EstimatePDF({ estimate, branding }: { estimate: any; branding?: 
 export function QuotePDF({ quote, branding }: { quote: any; branding?: Branding }) {
   return <CommercialDocumentPDF doc={quote} branding={branding} kind="QUOTE" />;
 }
+
+// Customer-facing Statement of Account PDF. Same branded header/footer as the
+// commercial documents. Renders ONLY customer-facing money (balances, invoices,
+// payments/credits, aging) — no payout/cost/margin/commission values.
+export function StatementPDF({ statement, branding }: { statement: any; branding?: Branding }) {
+  const b = branding ?? {};
+  const companyName = b.companyName || DEFAULTS.companyName;
+  const tagline = b.tagline || DEFAULTS.tagline;
+  const primary = b.primaryColor || DEFAULTS.primaryColor;
+  const footerText = b.invoiceFooter
+    ? `${companyName} — ${b.invoiceFooter}`
+    : `${companyName} — ${DEFAULTS.footer}`;
+  const styles = buildStyles(primary);
+  const pc = statement?.primeContractor;
+  const lines = statement?.lines ?? [];
+
+  const companyAddress = [b.address, [b.city, b.state, b.zip].filter(Boolean).join(', ')]
+    .filter(Boolean)
+    .join(', ');
+
+  return (
+    <Document>
+      <Page size="A4" style={styles.page}>
+        <View style={styles.header}>
+          <View>
+            {b.logoUrl ? (
+              // eslint-disable-next-line jsx-a11y/alt-text
+              <Image src={b.logoUrl} style={styles.logo} />
+            ) : null}
+            <Text style={styles.title}>{companyName}</Text>
+            <Text style={styles.subtitle}>{tagline}</Text>
+            {companyAddress ? <Text style={styles.companyMeta}>{companyAddress}</Text> : null}
+            {(b.phone || b.email) ? (
+              <Text style={styles.companyMeta}>{[b.phone, b.email].filter(Boolean).join('  •  ')}</Text>
+            ) : null}
+            {b.website ? <Text style={styles.companyMeta}>{b.website}</Text> : null}
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={{ fontSize: 18, fontWeight: 'bold' }}>STATEMENT</Text>
+            <Text style={{ fontSize: 12, color: primary, marginTop: 4 }}>{statement?.statementNumber ?? ''}</Text>
+            <Text style={styles.metaLabel}>Date: {fmtDate(statement?.statementDate)}</Text>
+            <Text style={styles.metaLabel}>
+              Period: {fmtDate(statement?.periodStart)} – {fmtDate(statement?.periodEnd)}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Statement For:</Text>
+          <Text style={styles.bold}>{pc?.companyName ?? ''}</Text>
+          {pc?.contactName ? <Text>{pc.contactName}</Text> : null}
+          {pc?.address ? <Text>{pc.address}</Text> : null}
+          {(pc?.city || pc?.state || pc?.zip) ? (
+            <Text>{[pc?.city, pc?.state, pc?.zip].filter(Boolean).join(', ')}</Text>
+          ) : null}
+          {pc?.email ? <Text>{pc.email}</Text> : null}
+          {statement?.project ? (
+            <Text style={{ marginTop: 6 }}>
+              Project: {statement.project.projectName ?? statement.project.projectCode ?? ''}
+            </Text>
+          ) : null}
+        </View>
+
+        {/* Account activity ledger */}
+        <View style={styles.section}>
+          <View style={styles.headerRow}>
+            <Text style={[styles.col1, styles.bold]}>Date / Description</Text>
+            <Text style={[styles.col2, styles.bold]}>Charges</Text>
+            <Text style={[styles.col3, styles.bold]}>Credits</Text>
+            <Text style={[styles.col4, styles.bold]}>Balance</Text>
+          </View>
+          {lines.map((l: any, idx: number) => (
+            <View key={idx} style={styles.row}>
+              <Text style={styles.col1}>
+                {l?.date ? `${fmtDate(l.date)} — ` : ''}{l?.description ?? ''}
+              </Text>
+              <Text style={styles.col2}>{(l?.charges ?? 0) > 0 ? fmt(l.charges) : ''}</Text>
+              <Text style={styles.col3}>{(l?.credits ?? 0) > 0 ? fmt(l.credits) : ''}</Text>
+              <Text style={styles.col4}>{fmt(l?.balance ?? 0)}</Text>
+            </View>
+          ))}
+        </View>
+
+        {/* Period summary */}
+        <View style={styles.totalsSection}>
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Opening Balance:</Text>
+            <Text style={styles.totalValue}>{fmt(statement?.openingBalance ?? 0)}</Text>
+          </View>
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Invoiced:</Text>
+            <Text style={styles.totalValue}>{fmt(statement?.invoicedAmount ?? 0)}</Text>
+          </View>
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Payments/Credits:</Text>
+            <Text style={styles.totalValue}>-{fmt(statement?.paymentsAmount ?? 0)}</Text>
+          </View>
+          <View style={[styles.totalRow, styles.grandTotal]}>
+            <Text style={styles.totalLabel}>Balance Due:</Text>
+            <Text style={styles.totalValue}>{fmt(statement?.endingBalance ?? 0)}</Text>
+          </View>
+        </View>
+
+        {/* Aging summary */}
+        <View style={[styles.section, { marginTop: 24 }]}>
+          <Text style={styles.sectionTitle}>Aging Summary</Text>
+          <View style={styles.headerRow}>
+            <Text style={[{ width: '20%' }, styles.bold]}>Current</Text>
+            <Text style={[{ width: '20%' }, styles.bold]}>1–30</Text>
+            <Text style={[{ width: '20%' }, styles.bold]}>31–60</Text>
+            <Text style={[{ width: '20%' }, styles.bold]}>61–90</Text>
+            <Text style={[{ width: '20%' }, styles.bold]}>91+</Text>
+          </View>
+          <View style={styles.row}>
+            <Text style={{ width: '20%' }}>{fmt(statement?.agingCurrent ?? 0)}</Text>
+            <Text style={{ width: '20%' }}>{fmt(statement?.aging1To30 ?? 0)}</Text>
+            <Text style={{ width: '20%' }}>{fmt(statement?.aging31To60 ?? 0)}</Text>
+            <Text style={{ width: '20%' }}>{fmt(statement?.aging61To90 ?? 0)}</Text>
+            <Text style={{ width: '20%' }}>{fmt(statement?.aging91Plus ?? 0)}</Text>
+          </View>
+        </View>
+
+        {statement?.notes ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Notes:</Text>
+            <Text style={styles.para}>{statement.notes}</Text>
+          </View>
+        ) : null}
+
+        <Text style={styles.footer}>{footerText}</Text>
+      </Page>
+    </Document>
+  );
+}

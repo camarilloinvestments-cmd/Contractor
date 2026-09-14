@@ -14,7 +14,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 
-export type DocumentType = 'ESTIMATE' | 'QUOTE' | 'INVOICE';
+export type DocumentType = 'ESTIMATE' | 'QUOTE' | 'INVOICE' | 'STATEMENT';
 
 type Tx = Prisma.TransactionClient | PrismaClient;
 
@@ -171,6 +171,85 @@ export function buildInvoiceSnapshot(invoice: any): DocumentSnapshot {
   };
 }
 
+// Customer-facing statement snapshot. Redaction by construction: only balances,
+// aging, and the customer-facing ledger rows — no payout/cost/margin/commission.
+export type StatementLineSnapshot = {
+  lineType: string;
+  refNumber: string | null;
+  date: string | null;
+  description: string;
+  charges: number;
+  credits: number;
+  balance: number;
+};
+
+export type StatementSnapshot = {
+  documentType: 'STATEMENT';
+  documentNumber: string;
+  status: string;
+  statementDate: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  primeContractor: {
+    companyName: string | null;
+    contactName: string | null;
+    email: string | null;
+    address: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
+  } | null;
+  project: { projectName: string | null; projectCode: string | null } | null;
+  openingBalance: number;
+  invoicedAmount: number;
+  paymentsAmount: number;
+  endingBalance: number;
+  aging: {
+    current: number;
+    d1to30: number;
+    d31to60: number;
+    d61to90: number;
+    d91plus: number;
+  };
+  lines: StatementLineSnapshot[];
+  notes: string | null;
+};
+
+/** Build an immutable snapshot from a fully-included Statement (with lines). */
+export function buildStatementSnapshot(statement: any): StatementSnapshot {
+  return {
+    documentType: 'STATEMENT',
+    documentNumber: statement.statementNumber,
+    status: statement.status,
+    statementDate: iso(statement.statementDate),
+    periodStart: iso(statement.periodStart),
+    periodEnd: iso(statement.periodEnd),
+    primeContractor: mapPrime(statement.primeContractor),
+    project: mapProject(statement.project),
+    openingBalance: statement.openingBalance ?? 0,
+    invoicedAmount: statement.invoicedAmount ?? 0,
+    paymentsAmount: statement.paymentsAmount ?? 0,
+    endingBalance: statement.endingBalance ?? 0,
+    aging: {
+      current: statement.agingCurrent ?? 0,
+      d1to30: statement.aging1To30 ?? 0,
+      d31to60: statement.aging31To60 ?? 0,
+      d61to90: statement.aging61To90 ?? 0,
+      d91plus: statement.aging91Plus ?? 0,
+    },
+    lines: (statement.lines ?? []).map((l: any) => ({
+      lineType: l.lineType,
+      refNumber: l.refNumber ?? null,
+      date: iso(l.date),
+      description: l.description ?? '',
+      charges: l.charges ?? 0,
+      credits: l.credits ?? 0,
+      balance: l.balance ?? 0,
+    })),
+    notes: statement.notes ?? null,
+  };
+}
+
 /**
  * Create (or return existing) the next revision for a document, storing the
  * given snapshot. Revision numbers are monotonic per (documentType, documentId).
@@ -179,7 +258,7 @@ export function buildInvoiceSnapshot(invoice: any): DocumentSnapshot {
 export async function createRevision(
   documentType: DocumentType,
   documentId: string,
-  snapshot: DocumentSnapshot,
+  snapshot: DocumentSnapshot | StatementSnapshot,
   createdById?: string | null,
   client: Tx = prisma
 ) {
