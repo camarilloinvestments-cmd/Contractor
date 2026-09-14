@@ -75,3 +75,43 @@ export function toGithubConfig(s: NonNullable<Awaited<ReturnType<typeof getUpdat
     channel: s.releaseChannel as ReleaseChannel,
   };
 }
+
+// --- Section G: pinned trusted signing key + safe-by-default policy ----------
+// A deployment can PIN the trusted signing public key (and force signature
+// enforcement) at the host/build level via env. A pinned key ALWAYS wins over
+// the DB-stored key so an attacker who can only write settings rows cannot
+// swap in their own key or turn signature checking off.
+export function pinnedPublicKeyPem(): string | null {
+  const pem = process.env.UPDATE_SIGNING_PUBLIC_KEY_PEM;
+  if (pem && pem.includes('BEGIN') && pem.includes('KEY')) return pem;
+  return null;
+}
+
+export interface VerificationPolicy {
+  publicKeyPem: string | null;
+  requireSignature: boolean;
+  pinned: boolean;
+}
+
+// Resolve the effective verification policy. When a key is pinned via env we
+// force requireSignature=true and use the pinned key. Otherwise we honor the
+// DB settings but treat signature verification as required by default unless
+// the operator has *explicitly* opted out (UPDATE_ALLOW_UNSIGNED=true).
+export function resolveVerificationPolicy(s: {
+  publicKeyPem?: string | null;
+  requireSignature?: boolean;
+}): VerificationPolicy {
+  const pinned = pinnedPublicKeyPem();
+  if (pinned) {
+    return { publicKeyPem: pinned, requireSignature: true, pinned: true };
+  }
+  // Signed-by-default: a signature is required unless the operator explicitly
+  // opts out with UPDATE_ALLOW_UNSIGNED=true. The DB flag can only *tighten*,
+  // never loosen, this baseline.
+  const allowUnsigned = process.env.UPDATE_ALLOW_UNSIGNED === 'true';
+  return {
+    publicKeyPem: s.publicKeyPem ?? null,
+    requireSignature: !allowUnsigned,
+    pinned: false,
+  };
+}

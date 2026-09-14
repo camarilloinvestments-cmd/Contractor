@@ -6,7 +6,7 @@ import fs from 'fs';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { APP_VERSION } from '@/lib/version';
-import { UPDATE_SETTINGS_ID, ensureUpdateSettings, toGithubConfig } from '@/lib/updates';
+import { UPDATE_SETTINGS_ID, ensureUpdateSettings, toGithubConfig, resolveVerificationPolicy } from '@/lib/updates';
 import { findLatestUpdate, downloadAsset } from '@/lib/updates/github';
 import { parseManifest } from '@/lib/updates/manifest';
 import { ensureDirs, stagedPackagePath, stagedManifestPath, verifyStaged } from '@/lib/updates/installer';
@@ -39,7 +39,8 @@ export async function POST(req: Request) {
     const pkgBuf = await downloadAsset(cfg, latest.packageAsset);
     fs.writeFileSync(stagedPackagePath(manifest.filename), pkgBuf);
 
-    const verification = verifyStaged(manifest, { publicKeyPem: s.publicKeyPem, requireSignature: s.requireSignature });
+    const policy = resolveVerificationPolicy(s);
+    const verification = verifyStaged(manifest, { publicKeyPem: policy.publicKeyPem, requireSignature: policy.requireSignature });
     if (!verification.ok) {
       // Never retain an unverified package.
       try { fs.rmSync(stagedPackagePath(manifest.filename)); } catch {}

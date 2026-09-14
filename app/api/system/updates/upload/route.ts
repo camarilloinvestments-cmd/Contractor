@@ -7,7 +7,7 @@ import fs from 'fs';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { APP_VERSION } from '@/lib/version';
-import { ensureUpdateSettings } from '@/lib/updates';
+import { ensureUpdateSettings, resolveVerificationPolicy } from '@/lib/updates';
 import { parseManifest } from '@/lib/updates/manifest';
 import { ensureDirs, stagedPackagePath, stagedManifestPath, verifyStaged } from '@/lib/updates/installer';
 import { writeAudit, requestMeta } from '@/lib/audit';
@@ -41,7 +41,8 @@ export async function POST(req: Request) {
     const pkgBuf = Buffer.from(await pkg.arrayBuffer());
     fs.writeFileSync(stagedPackagePath(manifest.filename), pkgBuf);
 
-    const verification = verifyStaged(manifest, { publicKeyPem: s.publicKeyPem, requireSignature: s.requireSignature });
+    const policy = resolveVerificationPolicy(s);
+    const verification = verifyStaged(manifest, { publicKeyPem: policy.publicKeyPem, requireSignature: policy.requireSignature });
     if (!verification.ok) {
       try { fs.rmSync(stagedPackagePath(manifest.filename)); } catch {}
       try { fs.rmSync(stagedManifestPath()); } catch {}

@@ -10,7 +10,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { APP_VERSION } from '@/lib/version';
-import { UPDATE_SETTINGS_ID, ensureUpdateSettings } from '@/lib/updates';
+import { UPDATE_SETTINGS_ID, ensureUpdateSettings, resolveVerificationPolicy } from '@/lib/updates';
 import { readStagedManifest, verifyStaged, preflight, writeInstallPlan, installPlanPath, stagedPackagePath } from '@/lib/updates/installer';
 import { writeAudit, requestMeta } from '@/lib/audit';
 
@@ -30,7 +30,10 @@ export async function POST(req: Request) {
   }
 
   // Re-verify at install time — never trust that the staged package is still good.
-  const verification = verifyStaged(manifest, { publicKeyPem: s.publicKeyPem, requireSignature: s.requireSignature });
+  // Use the pinned/safe-by-default policy: a build-pinned key (and forced
+  // signature enforcement) overrides whatever is stored in settings.
+  const policy = resolveVerificationPolicy(s);
+  const verification = verifyStaged(manifest, { publicKeyPem: policy.publicKeyPem, requireSignature: policy.requireSignature });
   if (!verification.ok) {
     await prisma.updateHistory.create({
       data: {

@@ -1232,7 +1232,7 @@ model UpdateSettings {
   githubTokenEncrypted   String? // PAT for private release access (encrypted at rest)
   autoCheck              Boolean        @default(false)
   publicKeyPem           String? // PEM public key for package signature verification
-  requireSignature       Boolean        @default(false)
+  requireSignature       Boolean        @default(true)
   maintenanceMode        Boolean        @default(false)
   latestVersion          String?
   latestReleaseAt        DateTime?

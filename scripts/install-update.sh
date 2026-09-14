@@ -118,7 +118,38 @@ maintenance true
 # 6) Stage new source (extract tarball over the working tree).
 log "Staging new source from ${PKG}"
 TMP="$(mktemp -d)"
-tar -xzf "$PKG" -C "$TMP"
+
+# Section G hardening: NEVER trust archive contents. Before extracting, scan
+# every entry and refuse the package if any is absolute, traverses out of the
+# root (..), is a sym/hardlink, or is a special (device/fifo) entry. A signed +
+# checksummed package can still carry a malicious member that escapes the root.
+log "Inspecting package entries for unsafe paths / links"
+while IFS= read -r line; do
+  # `tar -tvzf` verbose line: first char of the mode field is the entry type.
+  type_char="${line:0:1}"
+  entry_name="$(printf '%s' "$line" | sed -E 's/^.* [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} //')"
+  case "$type_char" in
+    l) rm -rf "$TMP"; fail "Refusing package: contains a symlink ('${entry_name}')." ;;
+    h) rm -rf "$TMP"; fail "Refusing package: contains a hardlink ('${entry_name}')." ;;
+    b|c|p|s) rm -rf "$TMP"; fail "Refusing package: contains a special device/fifo entry ('${entry_name}')." ;;
+  esac
+  case "$entry_name" in
+    /*)  rm -rf "$TMP"; fail "Refusing package: absolute path entry ('${entry_name}')." ;;
+    ../*|*/../*|*/..) rm -rf "$TMP"; fail "Refusing package: path traversal entry ('${entry_name}')." ;;
+  esac
+done < <(tar -tvzf "$PKG")
+
+# Extract WITHOUT preserving ownership/setuid and refusing any lingering unsafe
+# member (GNU tar rejects absolute + '..' members under these flags).
+if ! tar --no-same-owner --no-same-permissions --no-overwrite-dir         -xzf "$PKG" -C "$TMP" 2>/tmp/os1_tar_err; then
+  cat /tmp/os1_tar_err >&2 || true
+  rm -rf "$TMP"; fail "Extraction failed or package rejected as unsafe."
+fi
+
+# Malformed-root guard: expect EXACTLY one top-level directory and nothing else.
+top_count="$(find "$TMP" -maxdepth 1 -mindepth 1 | wc -l | tr -d ' ')"
+top_dirs="$(find "$TMP" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')"
+[[ "$top_count" == "1" && "$top_dirs" == "1" ]] || { rm -rf "$TMP"; fail "Malformed package root (expected a single top-level directory)."; }
 SRC_ROOT="$(find "$TMP" -maxdepth 1 -mindepth 1 -type d | head -1)"
 [[ -d "$SRC_ROOT" ]] || { rm -rf "$TMP"; fail "Unexpected package layout."; }
 if ! rsync -a --exclude data/ --exclude .env --exclude node_modules/ "$SRC_ROOT"/ ./; then

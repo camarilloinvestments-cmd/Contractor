@@ -10,6 +10,7 @@ import { prisma } from '@/lib/prisma';
 import { APP_VERSION } from '@/lib/version';
 import { compareVersions } from './semver';
 import { parseManifest, verifyPackage, type ReleaseManifest, type VerificationResult } from './manifest';
+import { inspectGzipTar } from './archive';
 import { UPDATE_STAGING_DIR } from './index';
 
 export function ensureDirs() {
@@ -42,7 +43,19 @@ export function verifyStaged(
     return { ok: false, checksumOk: false, signatureOk: null, errors: ['Staged package file is missing.'] };
   }
   const buf = fs.readFileSync(pkgPath);
-  return verifyPackage(buf, manifest, opts);
+  const result = verifyPackage(buf, manifest, opts);
+  // Section G: even a signed+checksummed package must not carry entries that
+  // escape the extraction root or abuse links. Refuse before it can be staged.
+  const archive = inspectGzipTar(buf);
+  if (!archive.ok) {
+    return {
+      ok: false,
+      checksumOk: result.checksumOk,
+      signatureOk: result.signatureOk,
+      errors: [...result.errors, ...archive.errors],
+    };
+  }
+  return result;
 }
 
 export interface PreflightResult {
