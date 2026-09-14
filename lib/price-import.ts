@@ -5,6 +5,23 @@
 import ExcelJS from 'exceljs';
 import { dollarsToCents } from '@/lib/utils/format';
 
+// Failure stages so the API can tell the operator WHERE an import failed
+// instead of a single generic "Failed to parse import" message.
+export type ImportStage =
+  | 'workbook-parsing'   // could not open/read the uploaded workbook/CSV bytes
+  | 'mapping'            // could not determine which columns map to which field
+  | 'validation'         // rows parsed but failed business validation
+  | 'staging-database';  // parsed & validated but failed to persist the staged import
+
+export class PriceImportError extends Error {
+  stage: ImportStage;
+  constructor(stage: ImportStage, message: string) {
+    super(message);
+    this.name = 'PriceImportError';
+    this.stage = stage;
+  }
+}
+
 export type ColumnMapping = {
   headerRowIndex: number; // 0-based row index of the header row within the grid
   jobCode: number;        // column indexes (0-based); -1 when unmapped
@@ -62,15 +79,27 @@ export async function extractGrid(buffer: Buffer, fileType: string): Promise<str
   }
   // xlsx / xls (exceljs reads xlsx; xls is best-effort)
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(buffer as any);
+  try {
+    await wb.xlsx.load(buffer as any);
+  } catch (e: any) {
+    throw new PriceImportError('workbook-parsing', `Unable to read the workbook. It may be corrupt or not a valid .xlsx file. (${e?.message || 'unknown error'})`);
+  }
   const ws = wb.worksheets[0];
-  if (!ws) return [];
+  if (!ws) throw new PriceImportError('workbook-parsing', 'The workbook contains no worksheets.');
   const grid: string[][] = [];
+  // CRITICAL: read cells by explicit column index (1..colCount), NOT via
+  // row.eachCell(), which SKIPS genuinely-absent cells and truncates trailing
+  // empty cells. Real spreadsheets omit empty cells rather than storing empty
+  // strings, so eachCell() silently shifts every column after a gap
+  // (e.g. an empty Category/Notes) and corrupts the A/B/C/D/E/F mapping.
+  // Preserving true Excel column positions is required by the canonical
+  // mapping: A=Job Code, B=Description, C=Unit, D=Rate, E=Category, F=Notes.
+  const colCount = Math.max(ws.columnCount || 0, ws.actualColumnCount || 0);
   ws.eachRow({ includeEmpty: true }, (row) => {
     const cells: string[] = [];
-    row.eachCell({ includeEmpty: true }, (cell) => {
-      cells.push(cellToString(cell.value));
-    });
+    for (let c = 1; c <= colCount; c++) {
+      cells.push(cellToString(row.getCell(c).value));
+    }
     grid.push(cells);
   });
   return grid;

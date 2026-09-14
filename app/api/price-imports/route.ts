@@ -2,7 +2,14 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
-import { extractGrid, autoDetectMapping, buildRows, buildSummary, type ColumnMapping } from '@/lib/price-import';
+import { extractGrid, autoDetectMapping, buildRows, buildSummary, PriceImportError, type ColumnMapping, type ImportStage } from '@/lib/price-import';
+
+const STAGE_STATUS: Record<ImportStage, number> = {
+  'workbook-parsing': 400,
+  'mapping': 422,
+  'validation': 422,
+  'staging-database': 500,
+};
 
 function canManage(role?: string | null) {
   return role === 'ADMIN' || role === 'PROJECT_MANAGER';
@@ -36,22 +43,39 @@ export async function POST(req: Request) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const fileType = file.type || (file.name.toLowerCase().endsWith('.csv') ? 'text/csv' : 'xlsx');
-    const grid = await extractGrid(buffer, fileType);
-    if (!grid.length) return NextResponse.json({ error: 'The file appears to be empty' }, { status: 400 });
 
+    // Stage 1: workbook parsing
+    let grid: string[][];
+    try {
+      grid = await extractGrid(buffer, fileType);
+    } catch (e) {
+      if (e instanceof PriceImportError) throw e;
+      throw new PriceImportError('workbook-parsing', `Unable to read the uploaded file: ${(e as any)?.message || 'unknown error'}`);
+    }
+    if (!grid.length) throw new PriceImportError('workbook-parsing', 'The file appears to be empty.');
+
+    // Stage 2: column mapping
     let mapping: ColumnMapping | null = null;
     if (mappingRaw) {
       try { mapping = JSON.parse(String(mappingRaw)); } catch { mapping = null; }
     }
     if (!mapping) mapping = autoDetectMapping(grid);
     if (!mapping) {
-      return NextResponse.json({ error: 'Could not detect columns. Please map columns manually.' }, { status: 422 });
+      throw new PriceImportError('mapping', 'Could not detect the Job Code, Description, Unit and Rate columns. Please map columns manually.');
     }
 
+    // Stage 3: row validation (per-row problems are collected as errorRows,
+    // not thrown; a fatal condition here would be no parseable data at all).
     const { rows, errors } = buildRows(grid, mapping);
+    if (rows.length === 0 && errors.length === 0) {
+      throw new PriceImportError('validation', 'No data rows were found beneath the header row.');
+    }
     const summary = buildSummary(rows, errors, book.lines.map((l) => ({ jobCode: l.jobCode, ratePerUnit: l.ratePerUnit })));
 
-    const record = await prisma.priceImport.create({
+    // Stage 4: persist the staged (PENDING) import
+    let record;
+    try {
+      record = await prisma.priceImport.create({
       data: {
         primeContractorId,
         priceBookId,
@@ -65,11 +89,18 @@ export async function POST(req: Request) {
         errorRows: errors as any,
         createdById: session.user.id,
       },
-    });
+      });
+    } catch (e) {
+      throw new PriceImportError('staging-database', `Failed to save the staged import: ${(e as any)?.message || 'unknown database error'}`);
+    }
     return NextResponse.json({ import: record, summary, mapping, errorCount: errors.length });
   } catch (err: any) {
-    console.error('Price import error:', err?.message);
-    return NextResponse.json({ error: 'Failed to parse import' }, { status: 500 });
+    if (err instanceof PriceImportError) {
+      console.error(`Price import failed [stage=${err.stage}]:`, err.message);
+      return NextResponse.json({ error: err.message, stage: err.stage }, { status: STAGE_STATUS[err.stage] });
+    }
+    console.error('Price import error (unclassified):', err?.message);
+    return NextResponse.json({ error: 'Unexpected error while processing the import.', stage: 'unknown' }, { status: 500 });
   }
 }
 
