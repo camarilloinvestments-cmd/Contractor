@@ -110,6 +110,8 @@ model User {
   accounts       Account[]
   sessions       Session[]
   mfaRecoveryCodes MfaRecoveryCode[]
+  mobileDevices  MobileDevice[]
+  mobileSessions MobileSession[]
 
   @@index([email])
   @@index([status])
@@ -234,6 +236,9 @@ model Worker {
   assignedVehicles FleetVehicle[]
   locations    WorkerLocation[]
   geoEvents    GeoEvent[]
+  devices          MobileDevice[]
+  mobileSessions   MobileSession[]
+  evidencePackages FieldEvidencePackage[]
 
   @@index([crewId])
 }
@@ -282,6 +287,7 @@ model Job {
   vehicleTelemetry  VehicleTelemetry[]
   workerLocations   WorkerLocation[]
   geoEvents         GeoEvent[]
+  evidencePackages  FieldEvidencePackage[]
 
   @@index([status])
   @@index([primeContractorId])
@@ -311,6 +317,7 @@ model Task {
   invoiceItem     InvoiceItem? @relation(fields: [invoiceItemId], references: [id])
   payoutRecord    PayoutRecord? @relation(fields: [payoutRecordId], references: [id])
   activityLogs    ActivityLog[]
+  evidencePackages FieldEvidencePackage[]
 
   @@index([jobId])
   @@index([workerId])
@@ -906,6 +913,7 @@ model Crew {
   members              Worker[]
   vehicles             FleetVehicle[]
   geoEvents            GeoEvent[]
+  evidencePackages     FieldEvidencePackage[]
 
   @@index([active])
 }
@@ -1163,4 +1171,195 @@ model UpdateHistory {
 
   @@index([action, createdAt])
   @@index([result])
+}
+
+// ============================================================================
+// Increment 10 — Workstreams P/Q/R: Mobile app foundation, offline sync ledger,
+// and permanent Field Evidence Package. All additive. The server remains
+// authoritative; mobile clients consume the official API and never duplicate
+// financial/business rules.
+// ============================================================================
+
+enum DevicePlatform {
+  IOS
+  ANDROID
+  WEB
+}
+
+enum DeviceStatus {
+  ACTIVE
+  REVOKED
+}
+
+// A registered mobile device (P — Device Management). A worker may have several
+// devices; each can be revoked independently (kills its sessions too).
+model MobileDevice {
+  id           String         @id @default(cuid())
+  deviceUuid   String         @unique // stable client-generated device identifier
+  workerId     String?
+  worker       Worker?        @relation(fields: [workerId], references: [id])
+  userId       String?
+  user         User?          @relation(fields: [userId], references: [id])
+  platform     DevicePlatform @default(ANDROID)
+  deviceName   String?
+  deviceModel  String?
+  osVersion    String?
+  appVersion   String?
+  pushToken    String? // Expo/FCM/APNs push token (opaque; not a secret)
+  status       DeviceStatus   @default(ACTIVE)
+  lastSeenAt   DateTime?
+  lastIp       String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  revokedAt    DateTime?
+  revokedById  String?
+  sessions     MobileSession[]
+  syncEvents   MobileSyncEvent[]
+  evidencePackages FieldEvidencePackage[]
+
+  @@index([workerId])
+  @@index([status])
+}
+
+// A device-bound session token (P — Session Revocation). Only the SHA-256 hash
+// of the token is stored; the plaintext is returned to the device once at login.
+model MobileSession {
+  id           String        @id @default(cuid())
+  tokenHash    String        @unique
+  deviceId     String
+  device       MobileDevice  @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  workerId     String?
+  worker       Worker?       @relation(fields: [workerId], references: [id])
+  userId       String?
+  user         User?         @relation(fields: [userId], references: [id])
+  mfaVerified  Boolean       @default(false)
+  expiresAt    DateTime
+  lastUsedAt   DateTime?
+  createdAt    DateTime      @default(now())
+  revokedAt    DateTime?
+
+  @@index([deviceId])
+  @@index([workerId])
+}
+
+enum SyncEntityType {
+  GPS
+  TASK_UPDATE
+  PRODUCTION
+  NOTE
+  EVIDENCE
+  PHOTO
+  DOCUMENT
+  SIGNATURE
+}
+
+enum SyncResult {
+  ACCEPTED
+  DUPLICATE
+  CONFLICT
+  REJECTED
+}
+
+// Server-side ledger for offline sync (Q). Each queued client record carries a
+// per-device local UUID + idempotency key; the server records the outcome so
+// replays are de-duplicated and conflicts are surfaced. This is the durable
+// server acknowledgment the client reconciles against.
+model MobileSyncEvent {
+  id             String         @id @default(cuid())
+  deviceId       String?
+  device         MobileDevice?  @relation(fields: [deviceId], references: [id])
+  workerId       String?
+  localUuid      String // client-generated UUID for the queued record
+  idempotencyKey String         @unique // stable key; dedupes retries
+  entityType     SyncEntityType
+  result         SyncResult     @default(ACCEPTED)
+  serverEntityId String? // id of the created/updated server row, when applicable
+  conflictStatus String? // null | "server_newer" | "duplicate" | details
+  deviceTimestamp DateTime? // when captured on device
+  createdTimestamp DateTime? // when queued on device
+  retryCount     Int            @default(0)
+  lastError      String?
+  createdAt      DateTime       @default(now())
+
+  @@unique([deviceId, localUuid])
+  @@index([workerId])
+  @@index([entityType])
+}
+
+enum GeofenceStatus {
+  INSIDE
+  OUTSIDE
+  UNKNOWN
+  NO_GEOFENCE
+}
+
+enum EvidenceKind {
+  PHOTO
+  DOCUMENT
+}
+
+enum EvidenceStatus {
+  SUBMITTED
+  ACCEPTED
+  FLAGGED
+}
+
+// Permanent Field Evidence Package (R). Captured when field work is submitted;
+// preserves the full completion context. Treated as immutable evidence once
+// ACCEPTED — never edited or deleted (status may be FLAGGED for review).
+model FieldEvidencePackage {
+  id                 String          @id @default(cuid())
+  localUuid          String          @unique // client UUID; idempotent submission
+  jobId              String
+  job                Job             @relation(fields: [jobId], references: [id])
+  taskId             String?
+  task               Task?           @relation(fields: [taskId], references: [id])
+  workerId           String?
+  worker             Worker?         @relation(fields: [workerId], references: [id])
+  crewId             String?
+  crew               Crew?           @relation(fields: [crewId], references: [id])
+  subcontractorName  String? // denormalized subcontractor company at time of work
+  deviceId           String?
+  device             MobileDevice?   @relation(fields: [deviceId], references: [id])
+  latitude           Float?
+  longitude          Float?
+  gpsAccuracyMeters  Float?
+  geofenceStatus     GeofenceStatus  @default(UNKNOWN)
+  geofenceDistanceFeet Float?
+  productionQuantity Float?
+  productionUnit     String?
+  notes              String?
+  signatureStoragePath String?
+  signatureContentType String?
+  signedByName       String?
+  capturedAt         DateTime? // device timestamp of completion
+  submittedAt        DateTime        @default(now()) // server receipt
+  status             EvidenceStatus  @default(SUBMITTED)
+  assets             EvidenceAsset[]
+  createdAt          DateTime        @default(now())
+
+  @@index([jobId])
+  @@index([taskId])
+  @@index([workerId])
+  @@index([status])
+}
+
+// A photo or document attached to a Field Evidence Package (R). Binary lives in
+// cloud storage; only the storage path + metadata are stored here.
+model EvidenceAsset {
+  id                String               @id @default(cuid())
+  packageId         String
+  package           FieldEvidencePackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  localUuid         String               @unique // client UUID; idempotent upload
+  kind              EvidenceKind         @default(PHOTO)
+  cloudStoragePath  String
+  contentType       String?
+  fileName          String?
+  sizeBytes         Int?
+  latitude          Float?
+  longitude         Float?
+  capturedAt        DateTime?
+  createdAt         DateTime             @default(now())
+
+  @@index([packageId])
 }
