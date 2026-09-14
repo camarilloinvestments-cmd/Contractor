@@ -46,20 +46,16 @@ export function BrandingTab() {
   const uploadLogo = async (file: File) => {
     setUploading(true);
     try {
-      const presign = await fetch('/api/settings/branding/logo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileName: file.name, contentType: file.type }),
-      });
-      const pj = await presign.json();
-      if (!presign.ok) throw new Error(pj?.error || 'Upload preparation failed');
-      const put = await fetch(pj.uploadUrl, { method: 'PUT', body: file });
-      if (!put.ok) throw new Error('Upload failed');
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/settings/branding/logo', { method: 'POST', body: fd });
+      const pj = await res.json();
+      if (!res.ok) throw new Error(pj?.error || 'Upload failed');
       setProfile((p) => ({
         ...p,
-        logoUrl: pj.publicUrl,
-        logoStoragePath: pj.cloud_storage_path,
-        logoContentType: pj.contentType,
+        logoUrl: pj.logoUrl,
+        logoStoragePath: pj.logoStoragePath,
+        logoContentType: pj.logoContentType,
       }));
       toast.success('Logo uploaded — click Save Branding to apply');
     } catch (e: any) {
@@ -69,8 +65,19 @@ export function BrandingTab() {
     }
   };
 
-  const clearLogo = () =>
-    setProfile((p) => ({ ...p, logoUrl: '', logoStoragePath: '', logoContentType: '' }));
+  const clearLogo = async () => {
+    try {
+      const res = await fetch('/api/settings/branding/logo', { method: 'DELETE' });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || 'Failed to remove logo');
+      }
+      setProfile((p) => ({ ...p, logoUrl: '', logoStoragePath: '', logoContentType: '' }));
+      toast.success('Logo removed');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to remove logo');
+    }
+  };
 
   const save = async () => {
     if (!profile.companyName || String(profile.companyName).trim().length === 0) {

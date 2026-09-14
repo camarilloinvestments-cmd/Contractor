@@ -41,3 +41,4 @@ Thumbs.db
 
 # ===== Update center staging / backups (never commit downloaded packages) =====
 data/updates/
+data/branding/

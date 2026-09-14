@@ -97,7 +97,16 @@ export async function getBrandingLogoBytes(
     return 'png';
   };
   try {
-    if (b.logoStoragePath) {
+    if (b.logoStoragePath && b.logoStoragePath.startsWith('local:')) {
+      // Local persistent-storage fallback (no S3 configured).
+      const { readLocalLogo } = await import('./branding-storage');
+      const local = await readLocalLogo(b.logoStoragePath);
+      if (local) {
+        const ct = b.logoContentType || local.contentType || 'image/png';
+        return { buffer: local.buffer, contentType: ct, ext: extFor(ct) };
+      }
+    }
+    if (b.logoStoragePath && !b.logoStoragePath.startsWith('local:')) {
       // Lazy-import so client bundles never pull in the S3 SDK.
       const { GetObjectCommand } = await import('@aws-sdk/client-s3');
       const { createS3Client, getBucketConfig } = await import('./aws-config');
