@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "build:selfhost": "next build --webpack"
   },
   "prisma": {
     "seed": "tsx --require dotenv/config scripts/safe-seed.ts"
@@ -137,5 +138,6 @@
   "resolutions": {
     "motion-dom": "12.23.12",
     "motion-utils": "12.23.6"
-  }
+  },
+  "packageManager": "yarn@4.9.2"
 }

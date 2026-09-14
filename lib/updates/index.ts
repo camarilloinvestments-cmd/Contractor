@@ -3,7 +3,7 @@
 import path from 'path';
 import { prisma } from '@/lib/prisma';
 import { encryptSecret, decryptSecret } from '@/lib/crypto';
-import { APP_VERSION, PRODUCT_SLUG } from '@/lib/version';
+import { APP_VERSION, APP_BUILD_SHA, getShortSha, PRODUCT_SLUG } from '@/lib/version';
 import type { GithubConfig } from './github';
 import type { ReleaseChannel } from './semver';
 
@@ -45,6 +45,16 @@ export function maskUpdateSettings(s: NonNullable<Awaited<ReturnType<typeof getU
     requireSignature: s.requireSignature,
     maintenanceMode: s.maintenanceMode,
     currentVersion: APP_VERSION,
+    currentCommit: APP_BUILD_SHA,
+    currentShortCommit: getShortSha(),
+    // Ruling #25: signature policy is surfaced read-only. A build-pinned trusted
+    // key always wins; enforcement is on by default and cannot be toggled off
+    // from the UI (only via the host env UPDATE_ALLOW_UNSIGNED).
+    signaturePinned: !!pinnedPublicKeyPem(),
+    signatureEnforced: resolveVerificationPolicy({ publicKeyPem: s.publicKeyPem, requireSignature: s.requireSignature }).requireSignature,
+    // Whether a GitHub release source is configured (owner+repo). The token is
+    // never exposed; only hasToken indicates whether one is stored.
+    githubConfigured: !!(s.githubOwner && s.githubRepo),
     latestVersion: s.latestVersion,
     latestReleaseAt: s.latestReleaseAt,
     latestCommit: s.latestCommit,

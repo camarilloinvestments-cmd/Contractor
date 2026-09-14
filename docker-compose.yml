@@ -27,6 +27,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Stamp the running image with the commit it was built from so the
+        # Update Center can show the exact short SHA. Pass on the CLI, e.g.
+        #   APP_BUILD_SHA=$(git rev-parse HEAD) docker compose up -d --build
+        APP_BUILD_SHA: ${APP_BUILD_SHA:-unknown}
     restart: unless-stopped
     depends_on:
       db:
@@ -61,6 +66,9 @@ services:
       # reports "Encryption configuration: MISSING" (fail-closed) if it is unset,
       # rather than refusing to start.
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
+
+      # --- Build/version stamp (shown in the Update Center) ---
+      APP_BUILD_SHA: ${APP_BUILD_SHA:-unknown}
     ports:
       - "${APP_PORT:-3000}:3000"
     volumes:

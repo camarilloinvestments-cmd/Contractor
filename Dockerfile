@@ -23,12 +23,16 @@ ENV NODE_ENV=production \
 WORKDIR /app
 
 # 1) Install dependencies first for better layer caching.
-#    --production=false forces devDependencies (tailwindcss, postcss,
-#    tailwindcss-animate, etc.) to install even though NODE_ENV=production -
-#    they are required by `yarn build`. A committed yarn.lock makes the install
-#    fully reproducible from a clean clone.
-COPY package.json yarn.lock ./
-RUN yarn install --frozen-lockfile --production=false --network-timeout 600000
+#    This is a Yarn 4 (Berry) project: the committed yarn.lock is Berry-format
+#    and .yarnrc.yml + the package.json "packageManager" field pin the exact
+#    toolchain. corepack activates Yarn 4.9.2 and `--immutable` guarantees the
+#    lockfile is honored exactly (fails the build if it would change), so the
+#    install is fully reproducible from a clean clone. devDependencies
+#    (tailwindcss, postcss, ...) are needed by the build and install by default.
+COPY package.json yarn.lock .yarnrc.yml ./
+RUN corepack enable \
+    && corepack prepare yarn@4.9.2 --activate \
+    && YARN_NETWORK_TIMEOUT=600000 yarn install --immutable
 
 # 2) Copy the rest of the application source.
 COPY . .
@@ -42,7 +46,14 @@ RUN sed -i 's#/home/ubuntu/fibertrack_pro/nextjs_space/node_modules/.prisma/clie
 
 # 4) Build the Next.js app. A syntactically-valid dummy DATABASE_URL is supplied
 #    so the build never needs a live database (no queries run at build time).
-RUN DATABASE_URL="postgresql://build:build@localhost:5432/build" yarn build
+#    Section 14: self-hosting builds use the webpack builder (build:selfhost)
+#    with an enlarged Node heap so large route graphs never OOM. APP_BUILD_SHA
+#    is baked in so the running app can report the exact commit it was built from.
+ARG APP_BUILD_SHA=unknown
+ENV APP_BUILD_SHA=${APP_BUILD_SHA}
+RUN DATABASE_URL="postgresql://build:build@localhost:5432/build" \
+    NODE_OPTIONS="--max-old-space-size=12288" \
+    yarn build:selfhost
 
 # 5) Entrypoint applies the DB schema (and optionally seeds) before starting.
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
