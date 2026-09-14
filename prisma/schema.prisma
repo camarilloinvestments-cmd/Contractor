@@ -196,6 +196,8 @@ model PrimeContractor {
   paymentMethods         PaymentMethod[]
   documentationWorkflows DocumentationWorkflow[]
   projects               Project[]
+  estimates              Estimate[]
+  quotes                 Quote[]
 }
 
 model TaskType {
@@ -283,6 +285,7 @@ model Job {
   status                         JobStatus                     @default(DRAFT)
   notes                          String?
   otherDirectCosts               Int                           @default(0) // cents; manual non-labor direct costs
+  sourceQuoteId                  String? // provenance: Quote this WO was converted from (no relation; snapshot preserved via DocumentRevision)
   salespersonId                  String?
   commissionPlanId               String?
   createdAt                      DateTime                      @default(now())
@@ -315,6 +318,7 @@ model Job {
   @@index([priceBookVersionId])
   @@index([salespersonId])
   @@index([documentationWorkflowVersionId])
+  @@index([sourceQuoteId])
 }
 
 model Task {
@@ -472,25 +476,25 @@ model CompanyProfile {
 // APP_ENCRYPTION_KEY. There is no plaintext fallback; if the key is missing or
 // wrong, decryption fails closed and email sending is disabled.
 model EmailSettings {
-  id                String   @id @default("default")
-  enabled           Boolean  @default(false)
-  host              String?
-  port              Int?     @default(587)
-  secure            Boolean  @default(false)
-  username          String?
-  passwordEncrypted String?
-  fromName          String?
-  fromEmail         String?
-  replyTo           String?
-  provider          String?  @default("custom")
-  transportMode     String?  @default("STARTTLS")
-  authMethod        String?  @default("PASSWORD")
-  oauthClientId     String?
+  id                         String   @id @default("default")
+  enabled                    Boolean  @default(false)
+  host                       String?
+  port                       Int?     @default(587)
+  secure                     Boolean  @default(false)
+  username                   String?
+  passwordEncrypted          String?
+  fromName                   String?
+  fromEmail                  String?
+  replyTo                    String?
+  provider                   String?  @default("custom")
+  transportMode              String?  @default("STARTTLS")
+  authMethod                 String?  @default("PASSWORD")
+  oauthClientId              String?
   oauthClientSecretEncrypted String?
   oauthRefreshTokenEncrypted String?
-  oauthTenantId     String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  oauthTenantId              String?
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
 }
 
 // Editable email templates. Bodies use an allow-listed {{variable}} syntax only;
@@ -578,6 +582,8 @@ model Project {
   defaultPriceBookVersion   PriceBookVersion? @relation("ProjectDefaultVersion", fields: [defaultPriceBookVersionId], references: [id], onDelete: SetNull)
   priceBooks                PriceBook[]       @relation("PriceBookProject")
   jobs                      Job[]
+  estimates                 Estimate[]
+  quotes                    Quote[]
 
   @@unique([primeContractorId, projectCode])
   @@index([primeContractorId])
@@ -782,6 +788,7 @@ model Salesperson {
   updatedAt         DateTime           @updatedAt
   jobs              Job[]
   commissionRecords CommissionRecord[]
+  quotes            Quote[]
 
   @@index([status])
 }
@@ -1660,4 +1667,196 @@ model CloseoutRevision {
   @@unique([jobId, revision])
   @@index([jobId])
   @@index([status])
+}
+
+// ============================================================================
+// PHASE 3 — COMMERCIAL DOCUMENTS (Estimates, Quotes, revision/send history,
+// concurrency-safe numbering). Customer-facing document models deliberately
+// contain NO subcontractor payout, internal cost, commission, or margin fields
+// (redaction by construction — requirement H).
+// ============================================================================
+
+enum EstimateStatus {
+  DRAFT
+  SENT
+  APPROVED
+  DECLINED
+  EXPIRED
+  CONVERTED
+  CANCELLED
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  VIEWED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CANCELLED
+  CONVERTED
+}
+
+// Concurrency-safe monotonic counter. Atomic { increment: 1 } inside a
+// transaction returns the new value; the document number is prefix + padded
+// value. Create sites additionally retry on P2002 (unique violation) so a
+// pre-existing legacy row can never cause a silent collision.
+model DocumentCounter {
+  key       String   @id // ESTIMATE | QUOTE | INVOICE | WORKORDER
+  prefix    String
+  value     Int      @default(0)
+  padding   Int      @default(5)
+  updatedAt DateTime @updatedAt
+}
+
+model Estimate {
+  id                 String          @id @default(cuid())
+  estimateNumber     String          @unique
+  primeContractorId  String
+  projectId          String?
+  title              String?
+  status             EstimateStatus  @default(DRAFT)
+  issueDate          DateTime        @default(now())
+  expirationDate     DateTime?
+  subtotal           Int             @default(0) // cents
+  taxRate            Float           @default(0) // percent
+  taxAmount          Int             @default(0) // cents
+  total              Int             @default(0) // cents
+  assumptions        String?
+  exclusions         String?
+  notes              String? // internal notes — NEVER rendered on customer PDF/email
+  currentRevision    Int             @default(0)
+  lastEmailedAt      DateTime?
+  emailCount         Int             @default(0)
+  convertedToQuoteId String?         @unique
+  createdById        String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  primeContractor    PrimeContractor @relation(fields: [primeContractorId], references: [id])
+  project            Project?        @relation(fields: [projectId], references: [id])
+  items              EstimateItem[]
+
+  @@index([primeContractorId])
+  @@index([projectId])
+  @@index([status])
+}
+
+model EstimateItem {
+  id                 String   @id @default(cuid())
+  estimateId         String
+  description        String
+  quantity           Float    @default(1)
+  unit               String?
+  unitPrice          Int      @default(0) // cents — customer-facing rate
+  amount             Int      @default(0) // cents — quantity * unitPrice
+  jobCode            String? // opaque snapshot of PriceBook code, scoped to version
+  priceBookId        String?
+  priceBookVersionId String?
+  sortOrder          Int      @default(0)
+  estimate           Estimate @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+
+  @@index([estimateId])
+}
+
+model Quote {
+  id                 String          @id @default(cuid())
+  quoteNumber        String          @unique
+  primeContractorId  String
+  projectId          String?
+  salespersonId      String?
+  sourceEstimateId   String? // provenance if converted from an Estimate
+  title              String?
+  status             QuoteStatus     @default(DRAFT)
+  issueDate          DateTime        @default(now())
+  expirationDate     DateTime?
+  subtotal           Int             @default(0) // cents
+  taxRate            Float           @default(0) // percent
+  taxAmount          Int             @default(0) // cents
+  total              Int             @default(0) // cents
+  terms              String?
+  exclusions         String?
+  notes              String? // internal notes — NEVER rendered on customer PDF/email
+  currentRevision    Int             @default(0)
+  lastEmailedAt      DateTime?
+  emailCount         Int             @default(0)
+  viewedAt           DateTime?
+  acceptedAt         DateTime?
+  acceptedByName     String?
+  acceptedByEmail    String?
+  acceptanceNote     String?
+  rejectedAt         DateTime?
+  rejectionReason    String?
+  convertedToJobId   String?         @unique
+  priceBookId        String? // pinned provenance copied at accept/convert time
+  priceBookVersionId String? // immutable version pin — re-query yields same rates
+  createdById        String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  primeContractor    PrimeContractor @relation(fields: [primeContractorId], references: [id])
+  project            Project?        @relation(fields: [projectId], references: [id])
+  salesperson        Salesperson?    @relation(fields: [salespersonId], references: [id])
+  items              QuoteItem[]
+
+  @@index([primeContractorId])
+  @@index([projectId])
+  @@index([salespersonId])
+  @@index([status])
+}
+
+model QuoteItem {
+  id                 String  @id @default(cuid())
+  quoteId            String
+  description        String
+  quantity           Float   @default(1)
+  unit               String?
+  unitPrice          Int     @default(0) // cents — customer-facing rate
+  amount             Int     @default(0) // cents — quantity * unitPrice
+  jobCode            String? // opaque snapshot of PriceBook code, scoped to version
+  priceBookId        String?
+  priceBookVersionId String?
+  sortOrder          Int     @default(0)
+  quote              Quote   @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@index([quoteId])
+}
+
+// Immutable point-in-time snapshot of a customer-facing document at the moment
+// it was (re)sent or converted. Never mutated after creation; a change to a sent
+// document produces a NEW revision. snapshot JSON holds the exact rendered data.
+model DocumentRevision {
+  id           String         @id @default(cuid())
+  documentType String // ESTIMATE | QUOTE | INVOICE
+  documentId   String
+  revision     Int
+  snapshot     Json
+  createdById  String?
+  createdAt    DateTime       @default(now())
+  sends        DocumentSend[]
+
+  @@unique([documentType, documentId, revision])
+  @@index([documentType, documentId])
+}
+
+// Append-only send/resend evidence. Never overwritten. Each send records the
+// exact revision, recipient, provider, provider message id, and success/failure.
+model DocumentSend {
+  id                String            @id @default(cuid())
+  documentType      String // ESTIMATE | QUOTE | INVOICE
+  documentId        String
+  revisionId        String?
+  toAddress         String
+  ccAddress         String?
+  bccAddress        String?
+  subject           String?
+  sentById          String?
+  provider          String?
+  providerMessageId String?
+  success           Boolean           @default(false)
+  failureCategory   String?
+  failureMessage    String?
+  createdAt         DateTime          @default(now())
+  revision          DocumentRevision? @relation(fields: [revisionId], references: [id], onDelete: SetNull)
+
+  @@index([documentType, documentId])
+  @@index([createdAt])
 }
