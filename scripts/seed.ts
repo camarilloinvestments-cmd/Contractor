@@ -376,6 +376,208 @@ async function main() {
     });
   }
 
+  // --- Increment 8 (v1.2.0): Fleet telematics (Geotab) demo data (idempotent) ---
+  // Provider settings default to the MOCK sandbox so the Live Map + sync work out of the box.
+  await prisma.fleetProviderSettings.upsert({
+    where: { id: 'default' },
+    update: {},
+    create: {
+      id: 'default',
+      provider: 'GEOTAB',
+      enabled: true,
+      syncEnabled: true,
+      database: 'MOCK',
+      username: 'demo@os1fibertrack.com',
+      serverUrl: 'my-mock.geotab.com',
+      lastConnectionStatus: 'OK',
+      lastSuccessAt: new Date(),
+    },
+  });
+
+  // Demo crew and membership (Carlos assigned to the field crew).
+  const crew1 = await prisma.crew.upsert({
+    where: { id: 'crew-001' },
+    update: {},
+    create: {
+      id: 'crew-001',
+      name: 'Fresno Splice Crew A',
+      subcontractorCompany: 'Ramirez Splicing LLC',
+      notes: 'Primary splicing crew for Central Valley builds.',
+      active: true,
+    },
+  });
+  await prisma.worker.update({ where: { id: worker1.id }, data: { crewId: crew1.id } });
+
+  // Demo job at the mock job site (downtown Fresno) with an explicit geofence.
+  const jobFresno = await prisma.job.upsert({
+    where: { jobNumber: 'JOB-0003' },
+    update: {},
+    create: {
+      jobNumber: 'JOB-0003',
+      jobName: 'Fresno Central Valley FTTH',
+      primeContractorId: pc1.id,
+      address: '2600 Fresno St',
+      city: 'Fresno',
+      state: 'CA',
+      zip: '93721',
+      latitude: 36.7378,
+      longitude: -119.7871,
+      geofenceRadiusFeet: 500,
+      status: 'ACTIVE',
+      startDate: new Date('2026-08-15'),
+      dueDate: new Date('2026-11-30'),
+    },
+  });
+
+  // Fleet vehicles matching the mock Geotab devices. Truck 121 is assigned to the crew,
+  // Carlos, and the Fresno job so the Live Map shows a fully-linked truck immediately.
+  const truck121 = await prisma.fleetVehicle.upsert({
+    where: { provider_geotabDeviceId: { provider: 'GEOTAB', geotabDeviceId: 'GT-DEV-TRUCK121' } },
+    update: {},
+    create: {
+      provider: 'GEOTAB',
+      geotabDeviceId: 'GT-DEV-TRUCK121',
+      name: 'Truck 121',
+      vehicleNumber: '121',
+      vin: '1FTFW1EF1EKE00121',
+      licensePlate: 'OS1-121',
+      make: 'Ford',
+      model: 'F-250',
+      year: 2021,
+      active: true,
+      assignedCrewId: crew1.id,
+      assignedWorkerId: worker1.id,
+      subcontractorCompany: 'Ramirez Splicing LLC',
+      currentJobId: jobFresno.id,
+    },
+  });
+  const van207 = await prisma.fleetVehicle.upsert({
+    where: { provider_geotabDeviceId: { provider: 'GEOTAB', geotabDeviceId: 'GT-DEV-VAN207' } },
+    update: {},
+    create: {
+      provider: 'GEOTAB',
+      geotabDeviceId: 'GT-DEV-VAN207',
+      name: 'Splice Van 207',
+      vehicleNumber: '207',
+      vin: '1GCWGAFP7N1200207',
+      licensePlate: 'OS1-207',
+      make: 'Chevrolet',
+      model: 'Express',
+      year: 2022,
+      active: true,
+    },
+  });
+
+  // Current vehicle state (recent = not stale) sitting at the Fresno job site.
+  await prisma.vehicleState.upsert({
+    where: { vehicleId: truck121.id },
+    update: {},
+    create: {
+      vehicleId: truck121.id,
+      latitude: 36.7378,
+      longitude: -119.7871,
+      recordedAt: new Date(),
+      speed: 0,
+      bearing: 135,
+      motion: 'STOPPED',
+      communicating: true,
+      currentDriverName: 'Jose Camarillo',
+      currentJobId: jobFresno.id,
+      lastUpdateAt: new Date(),
+    },
+  });
+  await prisma.vehicleState.upsert({
+    where: { vehicleId: van207.id },
+    update: {},
+    create: {
+      vehicleId: van207.id,
+      latitude: 36.7189,
+      longitude: -119.7620,
+      recordedAt: new Date(Date.now() - 2 * 60 * 1000),
+      speed: 32,
+      bearing: 315,
+      motion: 'DRIVING',
+      communicating: true,
+      currentDriverName: 'Field Driver',
+      lastUpdateAt: new Date(Date.now() - 2 * 60 * 1000),
+    },
+  });
+
+  // Historical telemetry (persisted across restarts; deduped on [vehicleId, providerRef]).
+  const truckBase = { lat: 36.7601, lng: -119.812 };
+  for (let step = 0; step <= 8; step++) {
+    const t = step / 8;
+    const lat = truckBase.lat + (36.7378 - truckBase.lat) * t;
+    const lng = truckBase.lng + (-119.7871 - truckBase.lng) * t;
+    await prisma.vehicleTelemetry.upsert({
+      where: { vehicleId_providerRef: { vehicleId: truck121.id, providerRef: `GT-DEV-TRUCK121-step${step}` } },
+      update: {},
+      create: {
+        vehicleId: truck121.id,
+        source: 'GEOTAB',
+        recordedAt: new Date(Date.now() - (8 - step) * 5 * 60 * 1000),
+        latitude: lat,
+        longitude: lng,
+        speed: step >= 8 ? 0 : 45,
+        bearing: 135,
+        driverName: 'Jose Camarillo',
+        jobId: jobFresno.id,
+        crewId: crew1.id,
+        providerRef: `GT-DEV-TRUCK121-step${step}`,
+      },
+    });
+  }
+
+  // Geofence events: distinct VEHICLE_ARRIVED and WORKER_ARRIVED at the Fresno site.
+  await prisma.geoEvent.upsert({
+    where: { id: 'geoevent-veh-001' },
+    update: {},
+    create: {
+      id: 'geoevent-veh-001',
+      eventType: 'VEHICLE_ARRIVED',
+      actorType: 'VEHICLE',
+      jobId: jobFresno.id,
+      vehicleId: truck121.id,
+      crewId: crew1.id,
+      latitude: 36.7378,
+      longitude: -119.7871,
+      occurredAt: new Date(Date.now() - 20 * 60 * 1000),
+      source: 'GEOTAB',
+      providerRef: 'GT-DEV-TRUCK121-step8',
+    },
+  });
+  await prisma.geoEvent.upsert({
+    where: { id: 'geoevent-wrk-001' },
+    update: {},
+    create: {
+      id: 'geoevent-wrk-001',
+      eventType: 'WORKER_ARRIVED',
+      actorType: 'WORKER',
+      jobId: jobFresno.id,
+      workerId: worker1.id,
+      crewId: crew1.id,
+      latitude: 36.7379,
+      longitude: -119.7869,
+      occurredAt: new Date(Date.now() - 15 * 60 * 1000),
+      source: 'MOBILE_APP',
+    },
+  });
+
+  // Separate mobile-worker GPS stream (kept distinct from truck GPS).
+  await prisma.workerLocation.upsert({
+    where: { id: 'workerloc-001' },
+    update: {},
+    create: {
+      id: 'workerloc-001',
+      workerId: worker1.id,
+      source: 'MOBILE_APP',
+      latitude: 36.7379,
+      longitude: -119.7869,
+      recordedAt: new Date(Date.now() - 3 * 60 * 1000),
+      accuracy: 5,
+      jobId: jobFresno.id,
+    },
+  });
   console.log('Seeding complete!');
 }
 

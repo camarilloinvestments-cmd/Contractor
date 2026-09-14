@@ -229,6 +229,13 @@ model Worker {
   activityLogs ActivityLog[]
   payoutRecords PayoutRecord[]
   subcontractorRates SubcontractorRate[]
+  crewId       String?
+  crew         Crew?      @relation(fields: [crewId], references: [id])
+  assignedVehicles FleetVehicle[]
+  locations    WorkerLocation[]
+  geoEvents    GeoEvent[]
+
+  @@index([crewId])
 }
 
 model WorkerRate {
@@ -270,6 +277,11 @@ model Job {
   commissionRecords CommissionRecord[]
   tasks             Task[]
   activityLogs      ActivityLog[]
+  geofenceRadiusFeet Int?           // per-job geofence override (feet); default in code
+  currentVehicles   FleetVehicle[]
+  vehicleTelemetry  VehicleTelemetry[]
+  workerLocations   WorkerLocation[]
+  geoEvents         GeoEvent[]
 
   @@index([status])
   @@index([primeContractorId])
@@ -843,4 +855,233 @@ model ApiIdempotencyKey {
   createdAt    DateTime @default(now())
 
   @@index([createdAt])
+}
+
+// ============================================================================
+// Increment 8 — Live Operations Map + Fleet Telematics (Geotab)
+// Provider-agnostic fleet/location model. Every location record carries its
+// source so mobile-worker GPS and vehicle GPS are never silently merged.
+// ============================================================================
+
+enum LocationSource {
+  MOBILE_APP
+  GEOTAB
+  JOB_SITE
+  MANUAL
+  OTHER_FLEET_PROVIDER
+}
+
+enum FleetProviderType {
+  GEOTAB
+}
+
+enum VehicleMotion {
+  DRIVING
+  STOPPED
+  UNKNOWN
+}
+
+enum GeoEventType {
+  WORKER_ARRIVED
+  WORKER_LEFT
+  VEHICLE_ARRIVED
+  VEHICLE_LEFT
+}
+
+enum GeoActorType {
+  WORKER
+  VEHICLE
+}
+
+// A dispatchable crew (in-house or subcontractor). Workers and vehicles can be
+// assigned to a crew for operational visibility on the Live Map.
+model Crew {
+  id                   String        @id @default(cuid())
+  name                 String
+  subcontractorCompany String?
+  notes                String?
+  active               Boolean       @default(true)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  members              Worker[]
+  vehicles             FleetVehicle[]
+  geoEvents            GeoEvent[]
+
+  @@index([active])
+}
+
+// Singleton fleet-provider (Geotab) configuration. Credentials are encrypted at
+// rest, never returned to the browser, and never written to logs.
+model FleetProviderSettings {
+  id                    String            @id @default("default")
+  provider              FleetProviderType @default(GEOTAB)
+  enabled               Boolean           @default(false)
+  syncEnabled           Boolean           @default(false)
+  database              String? // Geotab company/database
+  username              String? // Geotab API identity (not secret)
+  credentialEncrypted   String? // Geotab password/credential (encrypted at rest)
+  sessionIdEncrypted    String? // cached Geotab session token (encrypted at rest)
+  serverUrl             String? // resolved Geotab server (e.g. myXXXX.geotab.com)
+  lastSuccessAt         DateTime?
+  lastFailureAt         DateTime?
+  lastSyncError         String?
+  lastConnectionStatus  String? // OK | FAILED | UNTESTED
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+}
+
+// Persisted feed checkpoints so continuous synchronization can resume without
+// starting over or duplicating historical records (Geotab GetFeed fromVersion).
+model FleetFeedState {
+  id           String            @id @default(cuid())
+  provider     FleetProviderType @default(GEOTAB)
+  dataType     String // e.g. DeviceStatusInfo | LogRecord | Trip
+  fromVersion  String?
+  lastSyncAt   DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@unique([provider, dataType])
+}
+
+// Normalized fleet vehicle. geotabDeviceId ties it to the provider device.
+model FleetVehicle {
+  id                   String            @id @default(cuid())
+  provider             FleetProviderType @default(GEOTAB)
+  geotabDeviceId       String?
+  name                 String
+  vehicleNumber        String?
+  vin                  String?
+  make                 String?
+  model                String?
+  year                 Int?
+  licensePlate         String?
+  active               Boolean           @default(true)
+  assignedCrewId       String?
+  assignedWorkerId     String?
+  subcontractorCompany String?
+  currentJobId         String?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  crew                 Crew?             @relation(fields: [assignedCrewId], references: [id])
+  worker               Worker?           @relation(fields: [assignedWorkerId], references: [id])
+  currentJob           Job?              @relation(fields: [currentJobId], references: [id])
+  state                VehicleState?
+  telemetry            VehicleTelemetry[]
+  trips                VehicleTrip[]
+  geoEvents            GeoEvent[]
+
+  @@unique([provider, geotabDeviceId])
+  @@index([active])
+  @@index([assignedCrewId])
+  @@index([currentJobId])
+}
+
+// Latest known state of a vehicle (one row per vehicle).
+model VehicleState {
+  id                String        @id @default(cuid())
+  vehicleId         String        @unique
+  latitude          Float
+  longitude         Float
+  recordedAt        DateTime
+  speed             Float? // mph
+  bearing           Float? // degrees
+  motion            VehicleMotion @default(UNKNOWN)
+  communicating     Boolean       @default(true)
+  currentDriverName String?
+  currentJobId      String?
+  lastUpdateAt      DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  vehicle           FleetVehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+}
+
+// Historical vehicle telemetry (authorized logistics review). Deduplicated on
+// (vehicleId, providerRef) so re-synced feed records are never double-stored.
+model VehicleTelemetry {
+  id          String         @id @default(cuid())
+  vehicleId   String
+  source      LocationSource @default(GEOTAB)
+  recordedAt  DateTime
+  latitude    Float
+  longitude   Float
+  speed       Float?
+  bearing     Float?
+  driverName  String?
+  jobId       String?
+  crewId      String?
+  providerRef String? // provider event/record id
+  createdAt   DateTime       @default(now())
+  vehicle     FleetVehicle   @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  job         Job?           @relation(fields: [jobId], references: [id])
+
+  @@unique([vehicleId, providerRef])
+  @@index([vehicleId, recordedAt])
+  @@index([jobId])
+}
+
+// Trip / logistics rollups where authorized Geotab data is available.
+model VehicleTrip {
+  id             String       @id @default(cuid())
+  vehicleId      String
+  source         LocationSource @default(GEOTAB)
+  startAt        DateTime
+  endAt          DateTime?
+  startLat       Float?
+  startLng       Float?
+  endLat         Float?
+  endLng         Float?
+  distanceMeters Float?
+  drivingSeconds Int?
+  odometerMeters Float?
+  engineHours    Float?
+  providerRef    String?
+  createdAt      DateTime     @default(now())
+  vehicle        FleetVehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@unique([vehicleId, providerRef])
+  @@index([vehicleId, startAt])
+}
+
+// Continuous mobile-worker GPS stream (distinct from ActivityLog evidence GPS).
+model WorkerLocation {
+  id          String         @id @default(cuid())
+  workerId    String
+  source      LocationSource @default(MOBILE_APP)
+  latitude    Float
+  longitude   Float
+  recordedAt  DateTime
+  accuracy    Float?
+  jobId       String?
+  createdAt   DateTime       @default(now())
+  worker      Worker         @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  job         Job?           @relation(fields: [jobId], references: [id])
+
+  @@index([workerId, recordedAt])
+  @@index([jobId])
+}
+
+// Geofence arrival/departure events. WORKER_* and VEHICLE_* are distinct types
+// so OS1 can answer "when did the crew arrive" vs "when did the truck arrive".
+model GeoEvent {
+  id          String         @id @default(cuid())
+  eventType   GeoEventType
+  actorType   GeoActorType
+  jobId       String
+  workerId    String?
+  vehicleId   String?
+  crewId      String?
+  latitude    Float?
+  longitude   Float?
+  occurredAt  DateTime
+  source      LocationSource
+  providerRef String?
+  createdAt   DateTime       @default(now())
+  job         Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  worker      Worker?        @relation(fields: [workerId], references: [id])
+  vehicle     FleetVehicle?  @relation(fields: [vehicleId], references: [id])
+  crew        Crew?          @relation(fields: [crewId], references: [id])
+
+  @@index([jobId, occurredAt])
+  @@index([vehicleId, occurredAt])
+  @@index([workerId, occurredAt])
 }

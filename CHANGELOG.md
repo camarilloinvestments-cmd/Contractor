@@ -111,6 +111,64 @@ preserved, new tables created empty, zero schema drift).
   `ApiIdempotencyKey`; new `Invoice.amountPaid` column (defaulted). All additive —
   no destructive change. Monetary values stored as integer cents.
 
+### Workstreams N & O — Live Operations Map + Geotab fleet telematics (this increment)
+
+- **N — Live Operations Map.** New **Operations → Live Map** (Admin & Project
+  Manager) rendering job sites, field workers, subcontractors, crews, and fleet
+  trucks as distinct layers on an interactive map (Leaflet + OpenStreetMap tiles).
+  Each layer can be toggled independently; the view auto-refreshes on a short poll
+  so positions stay current without reloading. Truck pins open a popup with live
+  detail (driver, speed/motion, last-update age, assigned crew/worker/job) and
+  quick actions: **View Vehicle**, **Current Job**, **History**, and
+  **Today's Route**. Job sites show their geofence radius. All map data is served
+  from `/api/live-map`, which is **role-scoped**: Admin/PM see the full operation,
+  field workers see only their own position, and everyone else sees nothing.
+- **O — GPS, geofencing & fleet telematics (Geotab).** A provider-abstracted
+  telematics layer (future providers can be added behind the same interface) with
+  an official **MyGeotab API** connector configured at **Settings → Integrations
+  → Geotab**. Credentials are **server-side only, encrypted at rest via
+  `lib/crypto`, never returned to the browser and never logged**; no scraping is
+  used. A **feed/checkpoint sync** (`/api/fleet/sync`) resumes from a persisted
+  cursor — it does **not** require a browser to be open — and de-duplicates on
+  resume via a unique `(vehicleId, providerRef)` constraint so historical
+  telemetry is never double-stored. A built-in **MOCK sandbox** (database `MOCK`)
+  lets the full feature work end-to-end without live Geotab credentials.
+  - **Normalized fleet model** with current vehicle state (position, speed,
+    motion, driver, communicating flag) plus **stale/offline detection** (a
+    last-known position is shown and flagged stale past a threshold when a device
+    stops reporting).
+  - **Mobile-worker GPS is kept in a separate stream** (`WorkerLocation`) from
+    truck GPS (`VehicleTelemetry`) — the two are never conflated.
+  - **Distinct geofence event types**: `WORKER_ARRIVED` / `WORKER_LEFT` and
+    `VEHICLE_ARRIVED` / `VEHICLE_LEFT` are recorded as separate event types with a
+    separate actor type, so worker and vehicle arrivals are never merged.
+  - **Logistics history** at **Operations → Vehicle History**: pick a vehicle and
+    date range (optionally a job) to see the route line, timeline, and a playback
+    scrubber over stored telemetry. History reads report **"Source: Geotab"**.
+  - **Role-based privacy:** internal fleet history, subcontractor assignments, and
+    telematics are never exposed to customer/prime portal views or client-facing
+    exports.
+
+#### Database & migrations (N/O)
+- Additive migration `0009_fleet_telematics`. New enums `LocationSource`,
+  `FleetProviderType`, `VehicleMotion`, `GeoEventType`, `GeoActorType`; new tables
+  `Crew`, `FleetProviderSettings` (singleton), `FleetFeedState`
+  (`@@unique([provider, dataType])` sync checkpoint), `FleetVehicle`
+  (`@@unique([provider, geotabDeviceId])`), `VehicleState` (1-to-1 current state),
+  `VehicleTelemetry` (`@@unique([vehicleId, providerRef])` dedup), `VehicleTrip`,
+  `WorkerLocation`, and `GeoEvent`; new additive relations/columns on `Worker`
+  (crew membership, locations, geo events) and `Job` (`geofenceRadiusFeet`,
+  current vehicles, telemetry, worker locations, geo events). All additive — no
+  destructive change; zero schema drift verified.
+- **Role note:** the existing role set (`ADMIN`, `PROJECT_MANAGER`,
+  `FIELD_WORKER`, `SALES`) is used as-is. Fleet operations are limited to Admin &
+  Project Manager; field workers post their own GPS and see only their own
+  position; no new roles were introduced.
+
+#### Dependencies (N/O)
+- Added `leaflet` / `react-leaflet` (+ `@types/leaflet`) for the interactive map;
+  map components are loaded client-side only (no SSR) with OpenStreetMap tiles.
+
 ---
 ---
 

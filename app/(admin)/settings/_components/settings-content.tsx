@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FadeIn } from '@/components/ui/animate';
-import { Building2, Mail, FileText, ScrollText, ShieldCheck, CreditCard, KeyRound } from 'lucide-react';
+import { Building2, Mail, FileText, ScrollText, ShieldCheck, CreditCard, KeyRound, Truck } from 'lucide-react';
 import { BrandingTab } from './branding-tab';
 import { EmailTab } from './email-tab';
 import { TemplatesTab } from './templates-tab';
@@ -10,6 +10,7 @@ import { EmailLogsTab } from './email-logs-tab';
 import { SecurityTab } from './security-tab';
 import { PaymentsTab } from './payments-tab';
 import { ApiTab } from './api-tab';
+import { IntegrationsTab } from './integrations-tab';
 
 export function SettingsContent() {
   const [tab, setTab] = useState('branding');
@@ -22,12 +23,13 @@ export function SettingsContent() {
         </div>
       </FadeIn>
       <Tabs value={tab} onValueChange={setTab} className="space-y-6">
-        <TabsList className="grid w-full max-w-5xl grid-cols-7">
+        <TabsList className="grid w-full max-w-6xl grid-cols-8">
           <TabsTrigger value="branding"><Building2 className="w-4 h-4 mr-2" />Branding</TabsTrigger>
           <TabsTrigger value="email"><Mail className="w-4 h-4 mr-2" />Email</TabsTrigger>
           <TabsTrigger value="templates"><FileText className="w-4 h-4 mr-2" />Templates</TabsTrigger>
           <TabsTrigger value="payments"><CreditCard className="w-4 h-4 mr-2" />Payments</TabsTrigger>
           <TabsTrigger value="api"><KeyRound className="w-4 h-4 mr-2" />API</TabsTrigger>
+          <TabsTrigger value="integrations"><Truck className="w-4 h-4 mr-2" />Geotab</TabsTrigger>
           <TabsTrigger value="logs"><ScrollText className="w-4 h-4 mr-2" />Logs</TabsTrigger>
           <TabsTrigger value="security"><ShieldCheck className="w-4 h-4 mr-2" />Security</TabsTrigger>
         </TabsList>
@@ -36,6 +38,7 @@ export function SettingsContent() {
         <TabsContent value="templates"><TemplatesTab /></TabsContent>
         <TabsContent value="payments"><PaymentsTab /></TabsContent>
         <TabsContent value="api"><ApiTab /></TabsContent>
+        <TabsContent value="integrations"><IntegrationsTab /></TabsContent>
         <TabsContent value="logs"><EmailLogsTab /></TabsContent>
         <TabsContent value="security"><SecurityTab /></TabsContent>
       </Tabs>
