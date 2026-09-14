@@ -1,19 +1,25 @@
 'use client'
 
-import { motion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
 
-const viewportConfig = { once: true, margin: '-60px' as `${number}px` }
+// LIVE-DEFECT FIX (requirement 2): critical application data must NEVER depend on a
+// viewport/scroll animation firing to become visible. These helpers therefore animate
+// ON MOUNT (`animate=`), not on scroll-into-view (`whileInView=`), so the reveal is
+// guaranteed for content already on screen; and render fully-visible static markup when
+// the operator prefers reduced motion, so opacity:0 is never a resting state. The
+// animation only decorates already-mounted content; it can never hide it.
 
 export function FadeIn({
   children, delay = 0, duration = 0.4, className,
 }: {
   children: React.ReactNode; delay?: number; duration?: number; className?: string
 }) {
+  const reduce = useReducedMotion()
+  if (reduce) return <div className={className}>{children}</div>
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={viewportConfig}
+      animate={{ opacity: 1, y: 0 }}
       transition={{ duration, delay, ease: 'easeOut' }}
       className={className}
     >
@@ -27,11 +33,12 @@ export function ScaleIn({
 }: {
   children: React.ReactNode; delay?: number; className?: string
 }) {
+  const reduce = useReducedMotion()
+  if (reduce) return <div className={className}>{children}</div>
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
-      whileInView={{ opacity: 1, scale: 1 }}
-      viewport={viewportConfig}
+      animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.3, delay, ease: 'easeOut' }}
       className={className}
     >
@@ -52,11 +59,12 @@ export function SlideIn({
 }: {
   children: React.ReactNode; from?: keyof typeof slideDirections; delay?: number; className?: string
 }) {
+  const reduce = useReducedMotion()
+  if (reduce) return <div className={className}>{children}</div>
   return (
     <motion.div
       initial={{ opacity: 0, ...slideDirections[from] }}
-      whileInView={{ opacity: 1, x: 0, y: 0 }}
-      viewport={viewportConfig}
+      animate={{ opacity: 1, x: 0, y: 0 }}
       transition={{ duration: 0.4, delay, ease: 'easeOut' }}
       className={className}
     >
@@ -70,12 +78,13 @@ export function Stagger({
 }: {
   children: React.ReactNode; staggerDelay?: number; className?: string
 }) {
+  const reduce = useReducedMotion()
+  if (reduce) return <div className={className}>{children}</div>
   return (
     <motion.div
       variants={{ show: { transition: { staggerChildren: staggerDelay } } }}
       initial="hidden"
-      whileInView="show"
-      viewport={viewportConfig}
+      animate="show"
       className={className}
     >
       {children}
@@ -88,6 +97,8 @@ export function StaggerItem({
 }: {
   children: React.ReactNode; className?: string
 }) {
+  const reduce = useReducedMotion()
+  if (reduce) return <div className={className}>{children}</div>
   return (
     <motion.div
       variants={{

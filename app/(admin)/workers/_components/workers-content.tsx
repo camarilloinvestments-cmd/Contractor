@@ -15,12 +15,22 @@ import { toast } from 'sonner';
 export function WorkersContent() {
   const [workers, setWorkers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ name: '', workerType: 'SUBCONTRACTOR', email: '', phone: '', companyName: '' });
 
   const fetchData = () => {
-    fetch('/api/workers').then(r => r.json()).then(setWorkers).catch(console.error).finally(() => setLoading(false));
+    setLoading(true);
+    setError(null);
+    fetch('/api/workers')
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => setWorkers(Array.isArray(data) ? data : (data?.workers ?? [])))
+      .catch(() => setError('Unable to load workers. Please retry.'))
+      .finally(() => setLoading(false));
   };
   useEffect(() => { fetchData(); }, []);
 
@@ -77,6 +87,30 @@ export function WorkersContent() {
         <Input placeholder="Search workers..." value={search} onChange={(e: any) => setSearch(e.target.value)} className="pl-10" />
       </div>
 
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <Card key={i}><CardContent className="pt-6"><div className="h-16 animate-pulse rounded-md bg-muted" /></CardContent></Card>
+          ))}
+        </div>
+      ) : error ? (
+        <Card><CardContent className="py-12 text-center space-y-3">
+          <p className="text-sm font-medium text-destructive">{error}</p>
+          <Button variant="outline" onClick={fetchData}>Retry</Button>
+        </CardContent></Card>
+      ) : (workers ?? []).length === 0 ? (
+        <Card><CardContent className="py-12 text-center space-y-2">
+          <HardHat className="mx-auto w-8 h-8 text-muted-foreground" />
+          <p className="text-sm font-medium">No workers yet</p>
+          <p className="text-sm text-muted-foreground">Add your first subcontractor or in-house field worker to get started.</p>
+        </CardContent></Card>
+      ) : filtered.length === 0 ? (
+        <Card><CardContent className="py-12 text-center space-y-2">
+          <Search className="mx-auto w-8 h-8 text-muted-foreground" />
+          <p className="text-sm font-medium">No workers match &ldquo;{search}&rdquo;</p>
+          <p className="text-sm text-muted-foreground">Try a different search term.</p>
+        </CardContent></Card>
+      ) : (
       <Stagger staggerDelay={0.05}>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((w: any) => (
@@ -106,6 +140,7 @@ export function WorkersContent() {
           ))}
         </div>
       </Stagger>
+      )}
     </div>
   );
 }
