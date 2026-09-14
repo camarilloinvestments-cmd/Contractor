@@ -2,6 +2,7 @@
 // Increment 8 (Workstream N/O) — route history playback canvas (Leaflet).
 import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle } from 'react-leaflet';
 import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { useMemo } from 'react';
 
 function dot(color: string) {
@@ -25,9 +26,8 @@ export default function VehicleHistoryCanvas({
 
   return (
     <div className="h-full w-full">
-      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
       <MapContainer center={center} zoom={13} style={{ height: '100%', width: '100%' }} scrollWheelZoom>
-        <TileLayer attribution='&copy; OpenStreetMap contributors' url="https://blog.openstreetmap.org/wp-content/uploads/2025/07/Screen-Shot-2025-07-22-at-3.24.35-PM-1.png" />
+        <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" subdomains={['a', 'b', 'c']} maxZoom={19} />
         {points.length > 1 && <Polyline positions={points} pathOptions={{ color: '#0891b2', weight: 3, opacity: 0.7 }} />}
         {points[0] && <Marker position={points[0]} icon={dot('#059669')}><Popup>Start</Popup></Marker>}
         {points.length > 1 && <Marker position={points[points.length - 1]} icon={dot('#dc2626')}><Popup>End</Popup></Marker>}

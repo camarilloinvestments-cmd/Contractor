@@ -4,6 +4,7 @@
 // so it is safe to import leaflet directly here.
 import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
 import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { useMemo } from 'react';
 
 export type LiveLayers = { jobs: boolean; workers: boolean; subcontractors: boolean; crews: boolean; trucks: boolean };
@@ -47,9 +48,8 @@ export default function LiveMapCanvas({
 
   return (
     <div className="h-full w-full">
-      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
       <MapContainer center={center} zoom={12} style={{ height: '100%', width: '100%' }} scrollWheelZoom>
-        <TileLayer attribution='&copy; OpenStreetMap contributors' url="https://upload.wikimedia.org/wikipedia/commons/0/03/Tiled_web_map_Stevage.png?utm_source=en.wikipedia.org&utm_campaign=index&utm_content=original" />
+        <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" subdomains={['a', 'b', 'c']} maxZoom={19} />
 
         {layers.jobs && (data?.jobs || []).map((j: any) => (
           <div key={`job-${j.id}`}>
