@@ -252,7 +252,28 @@ preserved, new tables created empty, zero schema drift).
   email send/resend, `APP_ENCRYPTION_KEY` handling and audit logging verified at
   code level (unchanged from v1.1.0).
 
+#### Admin browser UI — Device Management & Evidence Review (P/R completion)
+- **Device Management** (`/system/devices`, Admin only). Full inventory table
+  (device name/model, user, platform, last seen, created, expires, status, last
+  IP, active session count) with a detail dialog (device metadata + per-session
+  expiry/last-used) and access-control actions: **View**, **Revoke Session**,
+  **Revoke Device**, **Revoke All User Devices** (all confirm-gated, audited as
+  `system.session_revoke` / `system.user_devices_revoke`).
+- **Evidence Review** (`/evidence`, Admin & Project Manager). Review queue with
+  status filter + search showing job, task, worker/subcontractor, evidence
+  counts, geofence badge (`INSIDE`/`OUTSIDE`/`UNKNOWN` with distance), production
+  quantity, submission status. Detail dialog resolves photos/documents/signature
+  via server-side signed URLs and shows GPS + accuracy. **Approve** (→ `ACCEPTED`)
+  and **Return for Correction** (→ `FLAGGED`, correction note required) persist
+  the reviewer, timestamp and note and are audited (`evidence.approve` /
+  `evidence.reject`). GPS is always shown and flagged, never a blocker.
+- New API routes: `GET`/`PATCH /api/evidence/{id}`,
+  `POST /api/system/devices/sessions/{id}/revoke`,
+  `POST /api/system/devices/user/{userId}/revoke`.
+
 #### Database & migrations (P/Q/R)
+- Additive migration `0012_evidence_review` adds `reviewedById`, `reviewedAt`
+  and `reviewNote` to `FieldEvidencePackage` (nullable, zero drift verified).
 - Additive migration `0011_mobile_evidence_sync`. New enums `DevicePlatform`,
   `DeviceStatus`, `SyncEntityType`, `SyncResult`, `GeofenceStatus`,
   `EvidenceKind`, `EvidenceStatus`; new tables `MobileDevice`, `MobileSession`,

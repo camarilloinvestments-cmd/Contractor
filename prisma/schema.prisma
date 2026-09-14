@@ -1335,6 +1335,9 @@ model FieldEvidencePackage {
   capturedAt         DateTime? // device timestamp of completion
   submittedAt        DateTime        @default(now()) // server receipt
   status             EvidenceStatus  @default(SUBMITTED)
+  reviewedById       String? // admin/PM who approved or flagged
+  reviewedAt         DateTime?
+  reviewNote         String? // reason for flag / correction request
   assets             EvidenceAsset[]
   createdAt          DateTime        @default(now())
 

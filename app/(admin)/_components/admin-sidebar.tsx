@@ -5,7 +5,7 @@ import { signOut } from 'next-auth/react';
 import {
   LayoutDashboard, Building2, Briefcase, Wrench, Users, FileText,
   DollarSign, BarChart3, Settings, LogOut, Cable, ChevronLeft, ChevronRight, HardHat, Coins, TrendingUp,
-  Map, Route, DownloadCloud
+  Map, Route, DownloadCloud, ClipboardCheck, TabletSmartphone
 } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
@@ -28,10 +28,12 @@ const managerNavItems = [
   { href: '/sales', label: 'Sales', icon: TrendingUp },
   { href: '/operations/live-map', label: 'Live Map', icon: Map },
   { href: '/operations/fleet/vehicle-history', label: 'Vehicle History', icon: Route },
+  { href: '/evidence', label: 'Evidence Review', icon: ClipboardCheck },
 ];
 
 const adminNavItems = [
   { href: '/system/updates', label: 'System Updates', icon: DownloadCloud },
+  { href: '/system/devices', label: 'Device Management', icon: TabletSmartphone },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 

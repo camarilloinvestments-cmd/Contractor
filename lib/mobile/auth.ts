@@ -172,3 +172,19 @@ export async function revokeDevice(deviceId: string, revokedById: string | null)
     data: { revokedAt: now },
   });
 }
+
+// Revoke every device (and all their sessions) belonging to a user. Used by
+// admin "revoke all devices" for an off-boarded or compromised account.
+export async function revokeAllUserDevices(userId: string, revokedById: string | null): Promise<number> {
+  const now = new Date();
+  const devices = await prisma.mobileDevice.findMany({ where: { userId, status: 'ACTIVE' }, select: { id: true } });
+  await prisma.mobileDevice.updateMany({
+    where: { userId, status: 'ACTIVE' },
+    data: { status: 'REVOKED', revokedAt: now, revokedById },
+  });
+  await prisma.mobileSession.updateMany({
+    where: { userId, revokedAt: null },
+    data: { revokedAt: now },
+  });
+  return devices.length;
+}
