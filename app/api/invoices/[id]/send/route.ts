@@ -10,6 +10,7 @@ import { getTemplate, TEMPLATE_KEYS } from '@/lib/email/templates';
 import { renderTemplate } from '@/lib/email/render';
 import { companyVariables, invoiceVariables, mergeVariables } from '@/lib/email/variables';
 import { sendEmail } from '@/lib/email/mailer';
+import { buildInvoiceSnapshot, createRevision, recordSend } from '@/lib/documents/snapshots';
 import { writeAudit, requestMeta } from '@/lib/audit';
 
 // Sends (or resends) an invoice by email with a branded PDF attached.
@@ -34,6 +35,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         { status: 400 }
       );
     }
+    const cc = (body?.cc as string) || null;
+    const bcc = (body?.bcc as string) || null;
+
+    // Immutable revision captured at send time (exactly what the attached PDF shows).
+    const snapshot = buildInvoiceSnapshot(invoice);
+    const revision = await createRevision('INVOICE', id, snapshot, session.user.id);
 
     const branding = await getCompanyProfile();
 
@@ -54,6 +61,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const result = await sendEmail({
       to,
+      cc,
+      bcc,
       subject,
       html,
       text,
@@ -68,6 +77,23 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           contentType: 'application/pdf',
         },
       ],
+    });
+
+    // Append-only send evidence — recorded whether success OR failure.
+    await recordSend({
+      documentType: 'INVOICE',
+      documentId: invoice.id,
+      revisionId: revision.id,
+      toAddress: to,
+      ccAddress: cc,
+      bccAddress: bcc,
+      subject,
+      sentById: session.user.id,
+      provider: result.provider ?? null,
+      providerMessageId: result.messageId ?? null,
+      success: result.ok,
+      failureCategory: result.ok ? null : result.errorCategory ?? null,
+      failureMessage: result.ok ? null : result.error ?? null,
     });
 
     if (!result.ok) {
@@ -97,11 +123,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       action: invoice.emailCount > 0 ? 'invoice.resend' : 'invoice.send',
       entityType: 'Invoice',
       entityId: invoice.id,
-      metadata: { to, templateKey, messageId: result.messageId ?? null },
+      metadata: { to, templateKey, revision: revision.revision, messageId: result.messageId ?? null },
       ...requestMeta(req),
     });
 
-    return NextResponse.json({ ok: true, messageId: result.messageId, invoice: { id: updated.id, status: updated.status, emailCount: updated.emailCount, lastEmailedAt: updated.lastEmailedAt } });
+    return NextResponse.json({ ok: true, messageId: result.messageId, revision: revision.revision, invoice: { id: updated.id, status: updated.status, emailCount: updated.emailCount, lastEmailedAt: updated.lastEmailedAt } });
   } catch (err: any) {
     console.error('Invoice send error:', err?.message);
     return NextResponse.json({ ok: false, error: err?.message ?? 'Failed to send invoice' }, { status: 500 });

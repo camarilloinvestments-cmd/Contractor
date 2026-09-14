@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { canManage } from '@/lib/rbac';
 import { prisma } from '@/lib/prisma';
+import { createWithNumber } from '@/lib/documents/numbering';
 
 export async function GET() {
   const session = await auth();
@@ -66,9 +67,6 @@ export async function POST(request: Request) {
       );
     }
 
-    const count = await prisma.invoice.count();
-    const invoiceNumber = `INV-${String(count + 1).padStart(4, '0')}`;
-
     // Group tasks by job
     const jobGroups: Record<string, any[]> = {};
     for (const task of (tasks ?? [])) {
@@ -98,27 +96,30 @@ export async function POST(request: Request) {
     const taxAmount = Math.round(subtotal * (taxRate / 100));
     const total = subtotal + taxAmount;
 
-    const invoice = await prisma.invoice.create({
-      data: {
-        invoiceNumber,
-        primeContractorId,
-        subtotal,
-        taxRate,
-        taxAmount,
-        total,
-        notes,
-        items: {
-          create: items.map((item: any) => ({
-            description: item.description,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            amount: item.amount,
-            jobId: item.jobId,
-          })),
+    // Independent, concurrency-safe INV-xxxxx numbering (5-digit; never count+1).
+    const invoice = await createWithNumber('INVOICE', (invoiceNumber) =>
+      prisma.invoice.create({
+        data: {
+          invoiceNumber,
+          primeContractorId,
+          subtotal,
+          taxRate,
+          taxAmount,
+          total,
+          notes,
+          items: {
+            create: items.map((item: any) => ({
+              description: item.description,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              amount: item.amount,
+              jobId: item.jobId,
+            })),
+          },
         },
-      },
-      include: { items: true },
-    });
+        include: { items: true },
+      })
+    );
 
     // Link tasks to invoice items
     for (let i = 0; i < (items?.length ?? 0); i++) {
