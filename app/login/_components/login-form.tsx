@@ -2,7 +2,6 @@
 import { useState } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { Cable, Mail, Lock, LogIn, ShieldCheck, KeyRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -175,14 +174,6 @@ export function LoginForm({ companyName = 'OS1 Fiber Track Pro' }: { companyName
               {mfaChallenge ? 'Verify' : 'Sign In'}
             </Button>
 
-            {!mfaChallenge && (
-              <p className="text-center text-sm text-muted-foreground">
-                Don&apos;t have an account?{' '}
-                <Link href="/signup" className="text-primary hover:underline font-medium">
-                  Sign up
-                </Link>
-              </p>
-            )}
           </form>
         </CardContent>
       </Card>
