@@ -2097,6 +2097,8 @@ model EvidenceUploadReservation {
   contentType       String   @default("image/jpeg")
   maxSizeBytes      Int      @default(20971520) // 20 MB
   consumed          Boolean  @default(false)
+  consumedAt        DateTime? // when the reservation was atomically claimed
+  evidenceId        String?   // FieldPhotoEvidence created from this reservation
   expiresAt         DateTime
   createdAt         DateTime @default(now())
 

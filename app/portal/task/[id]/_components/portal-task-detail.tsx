@@ -184,8 +184,15 @@ export function PortalTaskDetail({ id }: { id: string }) {
           toast.success('Evidence photo captured and uploaded');
           fetchData();
         } else {
-          // Refresh to show updated status (FAILED with message).
-          toast.warning('Photo saved locally — upload will retry when connected');
+          // Re-read the resulting status to give an accurate message: a GPS/quality
+          // block requires a retake, everything else will retry automatically.
+          const { listQueue: _lq } = await import('@/lib/evidence/offline-queue');
+          const after = (await _lq()).find(q => q.localUuid === queued.localUuid);
+          if (after?.status === 'BLOCKED_RETAKE_REQUIRED') {
+            toast.error(after.errorMessage || 'Photo rejected — retake with a valid GPS fix');
+          } else {
+            toast.warning('Photo saved locally — upload will retry when connected');
+          }
         }
       } else {
         toast.warning('Offline — photo saved locally and will upload when connected');
@@ -366,20 +373,40 @@ export function PortalTaskDetail({ id }: { id: string }) {
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2 text-sm font-medium">
                       <WifiOff className="w-4 h-4 text-amber-600" />
-                      <span>{evidenceQueue.filter(q => q.status === 'PENDING_UPLOAD' || q.status === 'FAILED').length} pending evidence photo(s)</span>
+                      <span>{evidenceQueue.filter(q => q.status === 'PENDING_UPLOAD' || q.status === 'RETRYABLE_ERROR' || q.status === 'UPLOADING').length} pending evidence photo(s)</span>
                     </div>
-                    <Button variant="outline" size="sm" onClick={handleRetryQueue} disabled={queueProcessing}>
-                      {queueProcessing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                      <span className="ml-1 text-xs">Retry</span>
-                    </Button>
+                    {evidenceQueue.some(q => q.status === 'PENDING_UPLOAD' || q.status === 'RETRYABLE_ERROR') && (
+                      <Button variant="outline" size="sm" onClick={handleRetryQueue} disabled={queueProcessing}>
+                        {queueProcessing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                        <span className="ml-1 text-xs">Retry</span>
+                      </Button>
+                    )}
                   </div>
                   <div className="space-y-1">
-                    {evidenceQueue.filter(q => q.status !== 'UPLOADED').map(q => (
-                      <div key={q.localUuid} className="flex items-center justify-between text-xs">
-                        <span className="truncate max-w-[60%]">{q.fileName}</span>
-                        <span className={q.status === 'FAILED' ? 'text-red-600' : q.status === 'UPLOADING' ? 'text-blue-600' : 'text-amber-600'}>{q.status.replace('_', ' ')}</span>
-                      </div>
-                    ))}
+                    {evidenceQueue.filter(q => q.status !== 'UPLOADED').map(q => {
+                      const blocked = q.status === 'BLOCKED_RETAKE_REQUIRED';
+                      const label = blocked
+                        ? 'Retake with valid GPS fix'
+                        : q.status === 'RETRYABLE_ERROR'
+                          ? 'Will retry'
+                          : q.status.replace(/_/g, ' ').toLowerCase();
+                      const color = blocked
+                        ? 'text-red-600 font-medium'
+                        : q.status === 'UPLOADING'
+                          ? 'text-blue-600'
+                          : q.status === 'RETRYABLE_ERROR'
+                            ? 'text-orange-600'
+                            : 'text-amber-600';
+                      return (
+                        <div key={q.localUuid} className="flex items-center justify-between text-xs gap-2">
+                          <span className="truncate max-w-[45%]">{q.fileName}</span>
+                          <span className={`text-right ${color}`}>
+                            {label}
+                            {blocked && q.errorMessage ? ` — ${q.errorMessage}` : ''}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </CardContent>
               </Card>

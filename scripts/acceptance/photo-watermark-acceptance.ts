@@ -203,7 +203,9 @@ async function main() {
   ok(39, 'reservation storage path uses server-generated key (§2)',
     (() => {
       const r = read('app/api/portal/photo-evidence/reserve/route.ts');
-      return /generatePresignedUploadUrl/.test(r) && /evidence-/.test(r);
+      const s = read('lib/s3.ts');
+      return /generateEvidenceUploadUrl/.test(r) &&
+        /evidence\/originals/.test(s) && /randomUUID\(\)/.test(s);
     })());
 
   // §3: Reverse geocode (FUNCTIONAL + STATIC)
@@ -230,7 +232,7 @@ async function main() {
   ok(45, 'offline queue module exists and uses IndexedDB (§4)',
     (() => {
       const q = read('lib/evidence/offline-queue.ts');
-      return /IndexedDB|openDB|idb/.test(q) && /PENDING_UPLOAD|UPLOADING|UPLOADED|FAILED/.test(q);
+      return /IndexedDB|openDB|idb/.test(q) && /PENDING_UPLOAD/.test(q) && /UPLOADED/.test(q);
     })());
   ok(46, 'offline queue stores field capturedAt, GPS, blob (§4)',
     (() => {
@@ -314,6 +316,76 @@ async function main() {
 
   ok(62, 'idb package declared in package.json (§4)',
     /"idb"/.test(read('package.json')));
+
+  // ======== Cold-review corrective pass 2 (§2/§3/§4) — STATIC ========
+  const reserveRoute = read('app/api/portal/photo-evidence/reserve/route.ts');
+  const s3Lib = read('lib/s3.ts');
+  const constants = exists('lib/evidence/upload-constants.ts') ? read('lib/evidence/upload-constants.ts') : '';
+  const queue = read('lib/evidence/offline-queue.ts');
+  const portal = read('app/portal/task/[id]/_components/portal-task-detail.tsx');
+
+  ok(85, '§3 registration HEADs object BEFORE downloading bytes',
+    (() => {
+      const iHead = portalRoute.indexOf('headObject(');
+      const iGet = portalRoute.indexOf('getObjectBytes(');
+      return iHead > -1 && iGet > -1 && iHead < iGet;
+    })());
+  ok(86, '§3 getObjectBytes accepts a size cap + s3 exposes headObject',
+    /export async function headObject/.test(s3Lib) &&
+    /getObjectBytes\(\s*[\s\S]*?maxBytes/.test(s3Lib) &&
+    /getObjectBytes\(originalStoragePath, maxSizeBytes\)/.test(portalRoute));
+  ok(87, '§3 oversized rejected pre-download (413) + unsupported type (415)',
+    /head\.contentLength[\s\S]*?>\s*maxSizeBytes[\s\S]*?413/.test(portalRoute) &&
+    /ALLOWED_EVIDENCE_MIME\.has\(headType\)[\s\S]*?415/.test(portalRoute));
+  ok(88, '§3 dedicated evidence prefix + high-entropy (uuid) storage key',
+    /evidence\/originals/.test(s3Lib) && /randomUUID\(\)/.test(s3Lib) &&
+    /generateEvidenceUploadUrl/.test(reserveRoute));
+  ok(89, '§3 reserve binds ContentType + returns reservation expiresAt',
+    /ContentType:\s*contentType/.test(s3Lib) && /expiresAt/.test(reserveRoute));
+  ok(90, '§2 single-use claim is atomic (updateMany consumed:false inside $transaction)',
+    (() => {
+      return /\$transaction\(async \(tx\)\s*=>/.test(portalRoute) &&
+        /tx\.evidenceUploadReservation\.updateMany\(/.test(portalRoute) &&
+        /consumed:\s*false/.test(portalRoute) &&
+        /data:\s*\{\s*consumed:\s*true,\s*consumedAt/.test(portalRoute) &&
+        /claim\.count\s*!==\s*1/.test(portalRoute);
+    })());
+  ok(91, '§2 evidence create is in the SAME transaction as the claim',
+    /tx\.fieldPhotoEvidence\.create/.test(portalRoute) && /allocateNumber\('PHOTO_EVIDENCE', tx\)/.test(portalRoute));
+  ok(92, '§2 reservation records consumedAt + evidenceId (lost-response idempotency)',
+    /consumedAt:\s*nowTs/.test(portalRoute) && /evidenceId:\s*rec\.id/.test(portalRoute) &&
+    /reservation\.evidenceId/.test(portalRoute));
+  ok(93, '§2 schema + migration 0024 add consumedAt/evidenceId additively',
+    (() => {
+      const s = read('prisma/schema.prisma');
+      const m = read('prisma/migrations/0024_evidence_reservation_atomic/migration.sql');
+      return /consumedAt\s+DateTime\?/.test(s) && /evidenceId\s+String\?/.test(s) &&
+        /ADD COLUMN IF NOT EXISTS "consumedAt"/i.test(m) && /ADD COLUMN IF NOT EXISTS "evidenceId"/i.test(m) &&
+        !/DROP\s+(TABLE|COLUMN)/i.test(m);
+    })());
+  ok(94, '§2/§3 shared upload-constants are the single source of limits',
+    /MAX_UPLOAD_BYTES/.test(constants) && /ALLOWED_EVIDENCE_MIME/.test(constants) &&
+    /from '@\/lib\/evidence\/upload-constants'/.test(portalRoute) &&
+    /from '@\/lib\/evidence\/upload-constants'/.test(reserveRoute));
+  ok(95, '§4 queue state machine adds RETRYABLE_ERROR + BLOCKED_RETAKE_REQUIRED',
+    /RETRYABLE_ERROR/.test(queue) && /BLOCKED_RETAKE_REQUIRED/.test(queue));
+  ok(96, '§4 expired/stale reservation is cleared and re-reserved (never reused)',
+    /reservationUsable/.test(queue) && /reservationExpiresAt/.test(queue) &&
+    /obtainReservation/.test(queue) &&
+    /reservationId:\s*null,\s*uploadUrl:\s*null/.test(queue));
+  ok(97, '§4 GPS-policy block is non-retryable (retake required, no auto-retry)',
+    (() => {
+      return /GPS_POLICY[\s\S]*?return 'blocked'/.test(queue) &&
+        /status === 'PENDING_UPLOAD' \|\| q\.status === 'RETRYABLE_ERROR'/.test(queue);
+    })());
+  ok(98, '§4 concurrent processing is prevented by an in-memory lock',
+    /const processing = new Set<string>\(\)/.test(queue) &&
+    /processing\.has\(input\.localUuid\)/.test(queue) && /processing\.add/.test(queue) &&
+    /processing\.delete/.test(queue));
+  ok(99, '§4 stuck UPLOADING records are reconciled on load',
+    /reconcileStuckUploads/.test(queue));
+  ok(100, '§4 portal surfaces the retake-required state to the technician',
+    /Retake with valid GPS fix/.test(portal) && /BLOCKED_RETAKE_REQUIRED/.test(portal));
 
   // ======== LIVE-REQUIRED ========
 

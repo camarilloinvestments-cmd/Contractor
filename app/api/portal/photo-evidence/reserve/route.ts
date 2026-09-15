@@ -2,17 +2,19 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
-import { generatePresignedUploadUrl } from '@/lib/s3';
+import { generateEvidenceUploadUrl } from '@/lib/s3';
+import {
+  ALLOWED_EVIDENCE_MIME as ALLOWED_MIME,
+  MAX_UPLOAD_BYTES,
+  RESERVATION_TTL_MS,
+  UPLOAD_URL_TTL_SECONDS,
+  extForMime,
+} from '@/lib/evidence/upload-constants';
 
-// Evidence upload reservation (§2 cold-review).
-// Server generates the storage key, binds it to actor/task/job, and returns a
-// presigned PUT URL. The client CANNOT supply an arbitrary path.
-
-const ALLOWED_MIME = new Set([
-  'image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic', 'image/heif',
-]);
-const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // 20 MB
-const RESERVATION_TTL_MS = 30 * 60 * 1000; // 30 minutes
+// Evidence upload reservation (§2/§3 cold-review).
+// Server generates a high-entropy storage key under a dedicated evidence prefix,
+// binds it to actor/task/job, and returns a presigned PUT URL that expires with
+// the reservation. The client CANNOT supply an arbitrary path.
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -54,12 +56,15 @@ export async function POST(request: Request) {
   const job = await prisma.job.findUnique({ where: { id: jobId }, select: { id: true } });
   if (!job) return NextResponse.json({ error: 'Work order not found' }, { status: 404 });
 
-  // Generate a server-controlled storage path.
-  const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
-  const safeName = (fileName || 'photo').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
-  const { uploadUrl, cloud_storage_path } = await generatePresignedUploadUrl(
-    `evidence-${safeName}.${ext}`, mime, false
+  // Generate a server-controlled, high-entropy storage path (dedicated prefix).
+  // fileName is intentionally NOT part of the key — it is not a security or
+  // uniqueness boundary. The UUID inside generateEvidenceUploadUrl is.
+  const ext = extForMime(mime);
+  const { uploadUrl, cloud_storage_path } = await generateEvidenceUploadUrl(
+    mime, ext, UPLOAD_URL_TTL_SECONDS
   );
+
+  const expiresAt = new Date(Date.now() + RESERVATION_TTL_MS);
 
   // Persist reservation bound to actor + task + job.
   const reservation = await prisma.evidenceUploadReservation.create({
@@ -71,7 +76,7 @@ export async function POST(request: Request) {
       storagePath: cloud_storage_path,
       contentType: mime,
       maxSizeBytes: MAX_UPLOAD_BYTES,
-      expiresAt: new Date(Date.now() + RESERVATION_TTL_MS),
+      expiresAt,
     },
   });
 
@@ -79,5 +84,6 @@ export async function POST(request: Request) {
     reservationId: reservation.id,
     uploadUrl,
     maxSizeBytes: MAX_UPLOAD_BYTES,
+    expiresAt: expiresAt.toISOString(),
   });
 }
