@@ -23,6 +23,12 @@ export type ReqMeta = { ipAddress?: string | null; userAgent?: string | null };
 
 export class AiIntakeError extends Error {}
 
+// Raised internally when the analysis run discovers, at finalization time, that
+// it no longer owns the intake (status is no longer ANALYZING - e.g. the state
+// was changed by another authoritative mutator between claim and finalize).
+// Its result is discarded WITHOUT overwriting the newer state.
+class AnalysisOwnershipLostError extends Error {}
+
 export async function analyzeIntake(intakeId: string, actor: ActorMeta, reqMeta: ReqMeta = {}) {
   const settingsRow = await getAiIntakeSettingsRaw();
   if (!settingsRow || !settingsRow.enabled) throw new AiIntakeError('AI intake is not enabled');
@@ -161,8 +167,20 @@ export async function analyzeIntake(intakeId: string, actor: ActorMeta, reqMeta:
     const anyReview = business.items.some((i) => i.requires_review) || dupHits.length > 0;
     const modelUsed = call.modelUsed ?? settingsRow.normalModel;
 
-    // Persist atomically. Only a SUCCESSFUL run replaces the prior draft/items.
+    // Persist atomically. Only a SUCCESSFUL run that STILL OWNS the intake
+    // replaces the prior draft/items. Defense-in-depth: re-assert ownership as
+    // the first statement in the tx via a conditional updateMany on
+    // status='ANALYZING'. If this run no longer owns the intake (0 rows matched),
+    // abort the whole transaction (rolling back the deleteMany) and discard the
+    // result rather than silently overwriting a newer committed state.
     await prisma.$transaction(async (tx) => {
+      const owned = await tx.aiWorkIntake.updateMany({
+        where: { id: intakeId, status: 'ANALYZING' },
+        data: { revision: { increment: 1 } },
+      });
+      if (owned.count !== 1) {
+        throw new AnalysisOwnershipLostError('Analysis result discarded: intake is no longer analyzing');
+      }
       await tx.aiIntakeItem.deleteMany({ where: { intakeId } });
       await tx.aiWorkIntake.update({
         where: { id: intakeId },
@@ -229,9 +247,18 @@ export async function analyzeIntake(intakeId: string, actor: ActorMeta, reqMeta:
 
     return { status: anyReview ? 'NEEDS_REVIEW' : 'READY', items: business.items.length };
   } catch (e) {
+    // Ownership lost at finalization: another authoritative mutator changed the
+    // state after our claim. Do NOT overwrite the newer state (no FAILED write,
+    // no error record) - simply discard this run's result.
+    if (e instanceof AnalysisOwnershipLostError) {
+      throw new AiIntakeError(e.message);
+    }
     const msg = e instanceof Error ? e.message : 'Analysis failed';
-    // Preserve sources + any prior draft; only flag this run as failed.
-    await prisma.aiWorkIntake.update({ where: { id: intakeId }, data: { status: 'FAILED', error: msg.slice(0, 500) } }).catch(() => {});
+    // Preserve sources + any prior draft; only flag this run as failed. The
+    // write is conditioned on status='ANALYZING' so a genuine failure can only
+    // flip the intake we still own to FAILED - it can never clobber a state that
+    // a concurrent mutator committed (e.g. REJECTED) after our claim.
+    await prisma.aiWorkIntake.updateMany({ where: { id: intakeId, status: 'ANALYZING' }, data: { status: 'FAILED', error: msg.slice(0, 500) } }).catch(() => {});
     await recordAiError(msg);
     await writeAudit({
       actor, action: 'ai_intake.analysis_failed', entityType: 'AiWorkIntake', entityId: intakeId,

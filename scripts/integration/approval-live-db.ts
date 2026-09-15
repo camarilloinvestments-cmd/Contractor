@@ -20,7 +20,7 @@
 // Run: DATABASE_URL=postgresql://postgres@127.0.0.1:55432/fibertrack_test \
 //        node_modules/.bin/tsx scripts/integration/approval-live-db.ts
 import { prisma } from '@/lib/prisma';
-import { approveIntake, AiApproveError } from '@/lib/ai-intake/approve';
+import { approveIntake, rejectIntake, AiApproveError } from '@/lib/ai-intake/approve';
 import { applyDraftEdit } from '@/lib/ai-intake/draft-edit';
 import { registerIntakeSource, removeIntakeSource } from '@/lib/ai-intake/sources';
 import { claimForAnalysis, IntakeStateLockError } from '@/lib/ai-intake/state-lock';
@@ -330,6 +330,98 @@ async function caseH(fx: Fixtures) {
   }
 }
 
+async function caseI(fx: Fixtures) {
+  console.log('\nI REAL REJECT vs APPROVE RACE (authoritative parent-row serialization)');
+  // A rejectable intake with one valid item. The REAL approval races the REAL
+  // reject path on the same parent row. Exactly one side may win; the forbidden
+  // states (resultingJobId set while REJECTED; a WO after a successful reject;
+  // IMPORTED later overwritten to REJECTED; partial job/tasks) must be impossible.
+  const N = 6;
+  for (let i = 0; i < N; i++) {
+    const startStatus = i % 2 === 0 ? 'READY' : 'NEEDS_REVIEW';
+    const intake = await makeIntake(fx, startStatus as any, [
+      { deviceId: `RA${i}001`, reviewResolution: 'CONFIRMED' },
+    ]);
+    const input = { jobName: 'RejectRace WO', itemDecisions: decisionsFor(intake.items, fx.taskTypeId) };
+    const [apprRes, rejRes] = await Promise.allSettled([
+      approveIntake(intake.id, input, actor),
+      rejectIntake(intake.id, 'itest reject race', actor),
+    ]);
+    const finalRow = await prisma.aiWorkIntake.findUnique({ where: { id: intake.id } });
+    const jobs = await jobCountFor(intake.intakeNumber);
+    const apprMadeWo = apprRes.status === 'fulfilled' && !!(apprRes.value as any)?.job;
+    const rejOk = rejRes.status === 'fulfilled';
+    const rejLocked = rejRes.status === 'rejected' && (rejRes.reason instanceof IntakeStateLockError);
+    // approveIntake surfaces a lost claim as AiApproveError (its own conditional
+    // claim / pre-tx REJECTED fail-fast), not IntakeStateLockError.
+    const apprLocked = apprRes.status === 'rejected' && (apprRes.reason instanceof AiApproveError);
+
+    // Global invariants for EVERY interleaving.
+    ok(`I#${i}: never a resultingJobId set together with REJECTED`,
+      !(finalRow?.status === 'REJECTED' && !!finalRow?.resultingJobId),
+      `status=${finalRow?.status} jobId=${finalRow?.resultingJobId}`);
+    ok(`I#${i}: at most one WO ever`, jobs <= 1, `jobs=${jobs}`);
+    ok(`I#${i}: exactly one side wins`, (apprMadeWo ? 1 : 0) + (rejOk ? 1 : 0) === 1,
+      `apprMadeWo=${apprMadeWo} rejOk=${rejOk}`);
+
+    if (rejOk) {
+      // REJECT won the parent row -> REJECTED, ZERO WO/Tasks, approval fails safely.
+      const jobId = (apprRes.status === 'fulfilled' ? (apprRes.value as any)?.job?.id : null) || null;
+      const tasks = jobId ? await taskCountFor(jobId) : 0;
+      ok(`I#${i}: REJECT won -> REJECTED, 0 WO, 0 Tasks, approval refused`,
+        finalRow?.status === 'REJECTED' && !finalRow?.resultingJobId && jobs === 0 && tasks === 0 && !apprMadeWo && apprLocked,
+        `status=${finalRow?.status} jobs=${jobs} tasks=${tasks} apprMadeWo=${apprMadeWo} apprLocked=${apprLocked}`);
+    } else {
+      // APPROVE won -> IMPORTED, exactly one WO, reject conflicts, stays IMPORTED.
+      const jobId = apprRes.status === 'fulfilled' ? (apprRes.value as any)?.job?.id : null;
+      const tasks = jobId ? await taskCountFor(jobId) : 0;
+      ok(`I#${i}: APPROVE won -> IMPORTED, exactly 1 WO + tasks, reject refused, stays IMPORTED`,
+        finalRow?.status === 'IMPORTED' && !!finalRow?.resultingJobId && jobs === 1 && tasks === 1 && rejLocked,
+        `status=${finalRow?.status} jobId=${finalRow?.resultingJobId} jobs=${jobs} tasks=${tasks} rejLocked=${rejLocked}`);
+    }
+  }
+}
+
+async function caseJ(fx: Fixtures) {
+  console.log('\nJ REAL REJECT vs ANALYZE CLAIM (mutual exclusion)');
+  const N = 6;
+  for (let i = 0; i < N; i++) {
+    const intake = await makeIntake(fx, 'READY', [{ deviceId: `RJ${i}001`, reviewResolution: 'CONFIRMED' }]);
+    const claim = () => prisma.$transaction(async (tx) => { await claimForAnalysis(tx, intake.id); });
+    const [anaRes, rejRes] = await Promise.allSettled([
+      claim(),
+      rejectIntake(intake.id, 'itest reject-vs-analyze', actor),
+    ]);
+    const finalRow = await prisma.aiWorkIntake.findUnique({ where: { id: intake.id } });
+    const anaWon = anaRes.status === 'fulfilled';
+    const rejWon = rejRes.status === 'fulfilled';
+    const rejLocked = rejRes.status === 'rejected' && (rejRes.reason instanceof IntakeStateLockError);
+    const anaLocked = anaRes.status === 'rejected' && (anaRes.reason instanceof IntakeStateLockError);
+
+    ok(`J#${i}: exactly one of analyze/reject wins`, (anaWon ? 1 : 0) + (rejWon ? 1 : 0) === 1,
+      `anaWon=${anaWon} rejWon=${rejWon}`);
+    // The forbidden state: REJECT succeeds while analysis owns ANALYZING.
+    ok(`J#${i}: never REJECTED while analysis owns ANALYZING`,
+      !(rejWon && finalRow?.status === 'ANALYZING'),
+      `rejWon=${rejWon} status=${finalRow?.status}`);
+
+    if (rejWon) {
+      ok(`J#${i}: REJECT won -> REJECTED and analysis claim refused`,
+        finalRow?.status === 'REJECTED' && anaLocked,
+        `status=${finalRow?.status} anaLocked=${anaLocked}`);
+      // A completed analysis cannot later overwrite the committed REJECTED state:
+      // a fresh claim on the REJECTED intake is refused (it is not analyzable).
+      const reclaim = await throwsStateLock(() => prisma.$transaction(async (tx) => { await claimForAnalysis(tx, intake.id); }));
+      ok(`J#${i}: analysis cannot re-claim a REJECTED intake (no later overwrite)`, reclaim,
+        `reclaim-refused=${reclaim}`);
+    } else {
+      ok(`J#${i}: ANALYZE won -> ANALYZING and reject refused`,
+        finalRow?.status === 'ANALYZING' && rejLocked,
+        `status=${finalRow?.status} rejLocked=${rejLocked}`);
+    }
+  }
+}
+
 async function main() {
   console.log('APPROVAL LIVE-DB INTEGRATION TEST');
   const fx = await seedFixtures();
@@ -341,6 +433,8 @@ async function main() {
   await caseF(fx);
   await caseG(fx);
   await caseH(fx);
+  await caseI(fx);
+  await caseJ(fx);
   console.log(`\nAPPROVAL LIVE-DB INTEGRATION: ${pass} passed, ${fail} failed`);
   await prisma.$disconnect();
   if (fail > 0) process.exit(1);

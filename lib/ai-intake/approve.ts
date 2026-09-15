@@ -12,8 +12,13 @@ import { writeAudit } from '@/lib/audit';
 import { allocateNumber } from '@/lib/documents/numbering';
 import { resolveWorkOrderPin, addBillingCodeToTask } from '@/lib/work-orders';
 import type { ActorMeta, ReqMeta } from './analyze';
+import { claimForRejection, IntakeStateLockError } from './state-lock';
 
 export class AiApproveError extends Error {}
+
+// Re-exported so the reject route can distinguish a state-lock conflict (409)
+// from a generic approve/reject error (400).
+export { IntakeStateLockError };
 
 export type ItemDecision = {
   itemId: string;
@@ -326,20 +331,21 @@ export async function rejectIntake(
   actor: ActorMeta,
   reqMeta: ReqMeta = {},
 ) {
-  const intake = await prisma.aiWorkIntake.findUnique({ where: { id: intakeId } });
-  if (!intake) throw new AiApproveError('Intake not found');
-  if (intake.resultingJobId) {
-    throw new AiApproveError('Intake already produced a work order and cannot be rejected');
-  }
-  const updated = await prisma.aiWorkIntake.update({
-    where: { id: intakeId },
-    data: {
-      status: 'REJECTED',
-      rejectedById: actor.id,
-      rejectedAt: new Date(),
-      rejectionReason: reason ?? null,
-    },
+  // Authoritative, race-safe rejection. The allowed-state check and the write to
+  // REJECTED happen in ONE conditional statement inside a transaction, using the
+  // SAME parent-row serialization as approve/analyze/draft. This closes the
+  // former findUnique -> unconditional update TOCTOU window: an intake can no
+  // longer be flipped to REJECTED while an approval owns it (APPROVING), while an
+  // analysis owns it (ANALYZING), after it produced a Work Order (IMPORTED /
+  // resultingJobId set), or once it is already REJECTED. claimForRejection throws
+  // IntakeStateLockError (-> HTTP 409) in all of those cases.
+  const updated = await prisma.$transaction(async (tx) => {
+    await claimForRejection(tx, intakeId, actor.id, reason ?? null);
+    // Re-read the freshly committed row inside the same transaction so the caller
+    // gets the authoritative post-claim state.
+    return tx.aiWorkIntake.findUnique({ where: { id: intakeId } });
   });
+  // Audit only AFTER the transaction commits the rejection.
   await writeAudit({
     actor, action: 'ai_intake.rejected', entityType: 'AiWorkIntake', entityId: intakeId,
     metadata: { reason: reason ?? null }, ...reqMeta,

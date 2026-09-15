@@ -33,7 +33,15 @@ export const MUTABLE_DRAFT_STATUSES = ['NEW', 'READY', 'NEEDS_REVIEW', 'FAILED']
 // APPROVING/IMPORTED/REJECTED (owned by approval / terminal).
 export const ANALYZABLE_STATUSES = ['NEW', 'FAILED', 'READY', 'NEEDS_REVIEW'] as const;
 
-export type IntakeLockKind = 'draft-edit' | 'analysis';
+// States from which an operator may REJECT (discard) the intake. Same draft-side
+// set as the other mutators. Deliberately EXCLUDES:
+//   ANALYZING - an analysis owns the frozen input set
+//   APPROVING - an approval owns the intake while it creates the Work Order
+//   IMPORTED  - terminal: already converted to a Work Order (must NEVER flip to REJECTED)
+//   REJECTED  - terminal: already discarded
+export const REJECTABLE_STATUSES = ['NEW', 'FAILED', 'READY', 'NEEDS_REVIEW'] as const;
+
+export type IntakeLockKind = 'draft-edit' | 'analysis' | 'rejection';
 
 // Thrown when the conditional claim matches zero rows (the intake is not in a
 // state that permits the requested mutation, or a concurrent claim won the row).
@@ -109,6 +117,60 @@ export async function claimForAnalysis(tx: TxClient, intakeId: string): Promise<
       'analysis',
       status,
       `Intake is currently ${status.toLowerCase()} and cannot be analyzed`,
+    );
+  }
+}
+
+// Conditionally claim the intake for REJECTION and finalize it to REJECTED in a
+// single authoritative statement. Uses the SAME parent-row serialization as the
+// other mutators: the conditional updateMany takes the row lock, so it cannot
+// race an approval/analysis/draft claim. The predicate additionally requires
+// resultingJobId IS NULL, so an intake that already produced a Work Order can
+// never be flipped to REJECTED even if a stale caller believed it was rejectable.
+// Throws IntakeStateLockError (mapped to HTTP 409) when the intake is not
+// currently rejectable or a concurrent claim won the row.
+export async function claimForRejection(
+  tx: TxClient,
+  intakeId: string,
+  rejectedById: string,
+  reason: string | null,
+): Promise<void> {
+  const res = await tx.aiWorkIntake.updateMany({
+    where: {
+      id: intakeId,
+      resultingJobId: null,
+      status: { in: [...REJECTABLE_STATUSES] },
+    },
+    data: {
+      status: 'REJECTED',
+      rejectedById,
+      rejectedAt: new Date(),
+      rejectionReason: reason ?? null,
+      revision: { increment: 1 },
+    },
+  });
+  if (res.count !== 1) {
+    const row = await tx.aiWorkIntake.findUnique({
+      where: { id: intakeId },
+      select: { status: true, resultingJobId: true },
+    });
+    if (!row) {
+      throw new IntakeStateLockError('rejection', null, 'Intake not found');
+    }
+    if (row.resultingJobId) {
+      throw new IntakeStateLockError(
+        'rejection',
+        row.status,
+        'Intake already produced a work order and cannot be rejected',
+      );
+    }
+    if (row.status === 'REJECTED') {
+      throw new IntakeStateLockError('rejection', row.status, 'Intake is already rejected');
+    }
+    throw new IntakeStateLockError(
+      'rejection',
+      row.status,
+      `Intake is currently ${row.status.toLowerCase()} and cannot be rejected until it settles`,
     );
   }
 }

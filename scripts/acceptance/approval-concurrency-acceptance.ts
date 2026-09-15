@@ -48,7 +48,13 @@ function main() {
   });
 
   check('the entire conversion runs inside a single interactive $transaction', () => {
-    const txCount = (src.match(/prisma\.\$transaction\(/g) || []).length;
+    // Scope to the approveIntake body only: rejectIntake now also opens its own
+    // (single) authoritative transaction, which must not inflate this count.
+    const apprStart = src.indexOf('export async function approveIntake');
+    const apprEnd = src.indexOf('export async function rejectIntake');
+    assert.ok(apprStart !== -1 && apprEnd !== -1 && apprStart < apprEnd, 'approveIntake body is locatable');
+    const apprBody = src.slice(apprStart, apprEnd);
+    const txCount = (apprBody.match(/prisma\.\$transaction\(/g) || []).length;
     assert.strictEqual(txCount, 1, 'exactly one $transaction opens the write path');
     const txIdx = src.indexOf('prisma.$transaction(');
     const body = src.slice(txIdx);
@@ -155,6 +161,47 @@ function main() {
     // A lost analysis claim must NOT set the intake to FAILED (claim is outside
     // the main try that maps errors to FAILED).
     assert.ok(/if \(e instanceof IntakeStateLockError\) throw new AiIntakeError\(e\.message\)/.test(analyze), 'lost claim surfaces a clean error, not FAILED');
+  });
+
+  check('reject goes through the SAME authoritative state lock (claimForRejection)', () => {
+    const lock = read('lib/ai-intake/state-lock.ts');
+    // Rejectable allow-list excludes ANALYZING/APPROVING/IMPORTED/REJECTED.
+    assert.ok(/REJECTABLE_STATUSES = \['NEW', 'FAILED', 'READY', 'NEEDS_REVIEW'\]/.test(lock), 'rejectable allow-list is the draft-side set');
+    // The rejection claim is a single conditional updateMany that also requires
+    // resultingJobId IS NULL and flips status to REJECTED with a revision bump.
+    assert.ok(/export async function claimForRejection\(/.test(lock), 'claimForRejection exists');
+    assert.ok(/updateMany\([\s\S]{0,260}resultingJobId: null[\s\S]{0,120}status: \{ in: \[\.\.\.REJECTABLE_STATUSES\] \}[\s\S]{0,160}status: 'REJECTED'[\s\S]{0,160}revision: \{ increment: 1 \}/.test(lock), 'rejection claim is one conditional CAS updateMany');
+    // IMPORTED / resultingJobId set is explicitly refused (never flips to REJECTED).
+    assert.ok(/row\.resultingJobId[\s\S]{0,160}already produced a work order and cannot be rejected/.test(lock), 'work-ordered intake can never be rejected');
+  });
+
+  check('rejectIntake uses a transactional claim, NOT findUnique->unconditional update', () => {
+    const src2 = read('lib/ai-intake/approve.ts');
+    const rejIdx = src2.indexOf('export async function rejectIntake');
+    assert.ok(rejIdx !== -1, 'rejectIntake exists');
+    const body = src2.slice(rejIdx);
+    assert.ok(/\$transaction\(async \(tx\) => \{\s*await claimForRejection\(tx, intakeId/.test(body), 'reject claims the lock first inside a tx');
+    // The old unconditional update({ status: 'REJECTED' }) must be gone.
+    assert.ok(!/aiWorkIntake\.update\(\{\s*where: \{ id: intakeId \},\s*data: \{\s*status: 'REJECTED'/.test(body), 'no unconditional REJECTED update remains');
+    // Audit only after commit.
+    const txEnd = body.indexOf('});');
+    assert.ok(txEnd !== -1 && body.indexOf('writeAudit(') > txEnd, 'audit is written after the tx commits');
+  });
+
+  check('reject route maps a state-lock conflict to HTTP 409', () => {
+    const route = read('app/api/ai-intake/[id]/reject/route.ts');
+    assert.ok(/IntakeStateLockError/.test(route), 'route imports the state-lock error');
+    assert.ok(/err instanceof IntakeStateLockError[\s\S]{0,120}status: 409/.test(route), 'state-lock conflict -> 409');
+  });
+
+  check('analysis finalization is guarded by ownership (defense-in-depth)', () => {
+    const analyze = read('lib/ai-intake/analyze.ts');
+    // Success persist re-asserts ownership on status='ANALYZING' before writing.
+    assert.ok(/updateMany\(\{\s*where: \{ id: intakeId, status: 'ANALYZING' \}[\s\S]{0,120}revision: \{ increment: 1 \}[\s\S]{0,160}owned\.count !== 1[\s\S]{0,120}AnalysisOwnershipLostError/.test(analyze), 'persist tx aborts if ownership lost');
+    // Ownership-lost result is discarded WITHOUT writing FAILED.
+    assert.ok(/e instanceof AnalysisOwnershipLostError[\s\S]{0,120}throw new AiIntakeError/.test(analyze), 'ownership loss discards result, no FAILED overwrite');
+    // The genuine-failure FAILED write is itself conditioned on ANALYZING.
+    assert.ok(/updateMany\(\{ where: \{ id: intakeId, status: 'ANALYZING' \}, data: \{ status: 'FAILED'/.test(analyze), 'FAILED write cannot clobber a concurrently-committed state');
   });
 
   console.log(`\nAPPROVAL CONCURRENCY ACCEPTANCE: ${pass} passed, ${fail} failed`);
