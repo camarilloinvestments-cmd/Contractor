@@ -340,6 +340,7 @@ model Task {
   primeRatePerUnitSnapshot Int? // snapshot: prime rate per unit (cents) at time of add
   calculatedPrimeAmount    Int? // snapshot: quantity * primeRatePerUnitSnapshot (cents)
   workerId                 String?
+  sourceWorkRef            String? // durable non-financial source device/work identifier (e.g. NP0003.C1); NEVER a billing code. Used by AI-intake duplicate detection.
   status                   TaskStatus             @default(PENDING)
   billableAmount           Int                    @default(0) // cents
   costAmount               Int                    @default(0) // cents
@@ -362,6 +363,7 @@ model Task {
   @@index([workerId])
   @@index([status])
   @@index([priceBookVersionId])
+  @@index([sourceWorkRef])
 }
 
 model ActivityLog {
@@ -2127,9 +2129,21 @@ enum AiIntakeStatus {
   NEEDS_REVIEW
   READY
   APPROVED
+  APPROVING
   IMPORTED
   REJECTED
   FAILED
+}
+
+// Validated operator review resolution for a flagged intake item. An item that
+// requires review (low confidence / contradiction / possible duplicate / undefined
+// terminology) can only be operationalized once an operator persists an explicit,
+// non-PENDING resolution here — free-form strings are never accepted.
+enum AiItemReviewResolution {
+  PENDING
+  CONFIRMED
+  CORRECTED
+  EXCLUDED
 }
 
 // Singleton OpenAI integration settings for AI Help. The API key is stored
@@ -2232,7 +2246,13 @@ model AiIntakeItem {
   duplicateOfJobId    String?
   proposedBillingCode String? // AI SUGGESTION ONLY — never auto-applied as a billing code
   // operator review + mapping (set at review time, never by AI)
-  reviewStatus        String       @default("PENDING") // PENDING | EDITED | APPROVED | REJECTED
+  reviewStatus        String       @default("PENDING") // legacy free-form lifecycle flag (kept for backward-compat)
+  // Validated server-enforced review resolution (Blocker 3). Approval REJECTS any
+  // included flagged item still PENDING; EXCLUDED items are omitted, never tasked.
+  reviewResolution    AiItemReviewResolution @default(PENDING)
+  reviewedById        String?
+  reviewedAt          DateTime?
+  reviewNote          String?
   mappedTaskTypeId    String?
   confirmedJobCode    String? // operator-confirmed billing code from pinned version
   quantity            Float?

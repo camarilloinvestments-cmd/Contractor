@@ -14,9 +14,11 @@ export async function POST() {
   const apiKey = getDecryptedApiKey(row);
   if (!apiKey) return NextResponse.json({ ok: false, error: 'No API key configured' }, { status: 400 });
 
+  // Blocker 1: pass the stored base through the server-side endpoint guard. A
+  // legacy/tampered non-official base is rejected before the key is ever sent.
   const result = await testConnection({
     apiKey,
-    apiBase: row.apiBase || 'https://api.openai.com/v1',
+    apiBase: row.apiBase,
     model: row.normalModel,
   });
   return NextResponse.json(result);

@@ -7,6 +7,7 @@
 //   model (used on hard/low-confidence extractions). Business logic is never
 //   hardcoded to a specific model name.
 import { openAiJsonSchema } from './schema';
+import { resolveOpenAiApiBase } from './openai-endpoint';
 
 export type OpenAiContentPart =
   | { type: 'input_text'; text: string }
@@ -52,13 +53,16 @@ function extractOutputText(data: any): string | null {
 
 async function callOnce(opts: {
   apiKey: string;
-  apiBase: string;
+  apiBase?: string | null;
   model: string;
   messages: OpenAiMessage[];
   signal?: AbortSignal;
 }): Promise<OpenAiCallResult> {
   try {
-    const res = await fetch(`${opts.apiBase.replace(/\/$/, '')}/responses`, {
+    // Blocker 1: pin the endpoint. A non-official (arbitrary/localhost/private)
+    // base throws here, BEFORE the credential is ever attached to a request.
+    const apiBase = resolveOpenAiApiBase(opts.apiBase);
+    const res = await fetch(`${apiBase}/responses`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -97,7 +101,7 @@ async function callOnce(opts: {
 // request the fallback directly (e.g. difficult drawings) via preferFallback.
 export async function runExtraction(opts: {
   apiKey: string;
-  apiBase: string;
+  apiBase?: string | null;
   normalModel: string;
   fallbackModel: string;
   messages: OpenAiMessage[];
@@ -121,11 +125,14 @@ export async function runExtraction(opts: {
 // Does not send any intake data. Returns a sanitized result.
 export async function testConnection(opts: {
   apiKey: string;
-  apiBase: string;
+  apiBase?: string | null;
   model: string;
 }): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await fetch(`${opts.apiBase.replace(/\/$/, '')}/responses`, {
+    // Blocker 1: Test Connection is held to the exact same pinned-endpoint policy
+    // as live extraction — it cannot be used to probe an arbitrary URL with the key.
+    const apiBase = resolveOpenAiApiBase(opts.apiBase);
+    const res = await fetch(`${apiBase}/responses`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${opts.apiKey}` },
       body: JSON.stringify({

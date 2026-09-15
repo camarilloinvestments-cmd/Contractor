@@ -4,7 +4,10 @@
 // default Prime Price Book and the default (configured) version used when
 // creating a Work Order for that project.
 import { prisma } from '@/lib/prisma';
+import type { Prisma } from '@prisma/client';
 import { resolveActiveVersion } from '@/lib/price-books';
+
+type Db = Prisma.TransactionClient | typeof prisma;
 
 export type ProjectInput = {
   primeContractorId: string;
@@ -111,8 +114,8 @@ export async function setProjectDefaults(
 // Resolve the version a NEW work order should pin for a project: the project's
 // explicitly configured default version if set, otherwise the active version of
 // the project's default book. Returns null if the project has no default book.
-export async function resolveProjectDefaultVersion(projectId: string) {
-  const project = await prisma.project.findUnique({
+export async function resolveProjectDefaultVersion(projectId: string, client: Db = prisma) {
+  const project = await client.project.findUnique({
     where: { id: projectId },
     include: {
       defaultPriceBookVersion: { include: { lines: true } },
@@ -127,7 +130,7 @@ export async function resolveProjectDefaultVersion(projectId: string) {
     };
   }
   if (project.defaultPriceBookId) {
-    const v = await resolveActiveVersion(project.defaultPriceBookId);
+    const v = await resolveActiveVersion(project.defaultPriceBookId, client);
     if (v) return { priceBookId: project.defaultPriceBookId, version: v };
   }
   return null;

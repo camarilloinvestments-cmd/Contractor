@@ -279,7 +279,11 @@ async function main() {
 
   await check('approval creates the work order via the concurrency-safe numberer', () => {
     const ap = read('lib/ai-intake/approve.ts');
-    assert.ok(/createWithNumber\('WORKORDER'/.test(ap), 'uses createWithNumber');
+    // Blocker 2: the WO number is now allocated on the SAME interactive tx client
+    // (allocateNumber(key, tx)) so numbering + job + tasks commit atomically,
+    // replacing the old standalone createWithNumber (which could not join the tx).
+    assert.ok(/allocateNumber\('WORKORDER', tx\)/.test(ap), 'uses the transactional numberer allocateNumber(..., tx)');
+    assert.ok(/prisma\.\$transaction\(/.test(ap), 'conversion runs inside an interactive transaction');
     assert.ok(/resolveWorkOrderPin/.test(ap), 'pins the exact price book version');
     assert.ok(/status: 'DRAFT'/.test(ap), 'work order starts as DRAFT for OS1 flow');
   });

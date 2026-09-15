@@ -289,15 +289,20 @@ export async function resolveActivePriceBook(primeContractorId: string, name?: s
 }
 
 // Resolve the currently-configured ACTIVE version of a specific book.
-export async function resolveActiveVersion(priceBookId: string) {
-  const active = await prisma.priceBookVersion.findFirst({
+// Accepts an optional transaction client so callers running inside a DB
+// transaction resolve pins against the same tx (concurrency-safe approval).
+export async function resolveActiveVersion(
+  priceBookId: string,
+  client: Prisma.TransactionClient | typeof prisma = prisma,
+) {
+  const active = await client.priceBookVersion.findFirst({
     where: { priceBookId, status: 'ACTIVE' },
     orderBy: { version: 'desc' },
     include: { lines: true },
   });
   if (active) return active;
   // Fall back to the latest version if none is explicitly ACTIVE.
-  return prisma.priceBookVersion.findFirst({
+  return client.priceBookVersion.findFirst({
     where: { priceBookId },
     orderBy: { version: 'desc' },
     include: { lines: true },

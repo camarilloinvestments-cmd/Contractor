@@ -13,8 +13,13 @@
 // Task snapshotting: when an opaque billing code is added to a WO task, the
 // line is resolved ONLY from the WO's pinned version, and the resolved values
 // are copied onto the task as immutable historical evidence.
+import { Prisma, PrismaClient } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { resolveProjectDefaultVersion } from '@/lib/projects';
+
+// A Prisma client OR an interactive-transaction client. Helpers accept this so a
+// caller can run them inside a single atomic $transaction (Blocker 2).
+type Db = Prisma.TransactionClient | PrismaClient;
 
 export type WorkOrderPin = {
   primeContractorId: string;
@@ -29,8 +34,10 @@ export type WorkOrderPin = {
 export async function resolveWorkOrderPin(opts: {
   projectId: string;
   overrideVersionId?: string | null;
+  tx?: Db;
 }): Promise<WorkOrderPin> {
-  const project = await prisma.project.findUnique({
+  const db: Db = opts.tx ?? prisma;
+  const project = await db.project.findUnique({
     where: { id: opts.projectId },
     select: { id: true, primeContractorId: true },
   });
@@ -38,7 +45,7 @@ export async function resolveWorkOrderPin(opts: {
 
   // Authorized override: pin an explicit version instead of the default.
   if (opts.overrideVersionId) {
-    const version = await prisma.priceBookVersion.findUnique({
+    const version = await db.priceBookVersion.findUnique({
       where: { id: opts.overrideVersionId },
       include: { priceBook: { select: { id: true, primeContractorId: true } } },
     });
@@ -54,7 +61,7 @@ export async function resolveWorkOrderPin(opts: {
     };
   }
 
-  const resolved = await resolveProjectDefaultVersion(opts.projectId);
+  const resolved = await resolveProjectDefaultVersion(opts.projectId, db);
   if (!resolved) {
     throw new Error('Project has no default price book/version configured; select one or provide an override');
   }
@@ -78,8 +85,11 @@ export async function addBillingCodeToTask(input: {
   workerId?: string | null;
   workerPayoutRate?: number; // cents per unit; independent of prime rate
   description?: string | null;
+  sourceWorkRef?: string | null; // durable non-financial work/device identifier (Blocker 4)
+  tx?: Db;
 }) {
-  const job = await prisma.job.findUnique({
+  const db: Db = input.tx ?? prisma;
+  const job = await db.job.findUnique({
     where: { id: input.jobId },
     select: { id: true, priceBookId: true, priceBookVersionId: true },
   });
@@ -89,7 +99,7 @@ export async function addBillingCodeToTask(input: {
   }
 
   // Resolve the code ONLY from the pinned version - never from a newer lookup.
-  const line = await prisma.priceLine.findFirst({
+  const line = await db.priceLine.findFirst({
     where: { priceBookVersionId: job.priceBookVersionId, jobCode: input.jobCode },
   });
   if (!line) {
@@ -101,7 +111,7 @@ export async function addBillingCodeToTask(input: {
   const calculatedPrimeAmount = Math.round(primeRatePerUnit * input.quantity);
   const costAmount = Math.round(payoutRate * input.quantity);
 
-  return prisma.task.create({
+  return db.task.create({
     data: {
       jobId: input.jobId,
       taskTypeId: input.taskTypeId,
@@ -110,6 +120,7 @@ export async function addBillingCodeToTask(input: {
       billingRate: primeRatePerUnit,
       workerPayoutRate: payoutRate,
       workerId: input.workerId ?? null,
+      sourceWorkRef: input.sourceWorkRef ?? null,
       billableAmount: calculatedPrimeAmount,
       costAmount,
       profitAmount: calculatedPrimeAmount - costAmount,

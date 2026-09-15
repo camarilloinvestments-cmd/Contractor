@@ -23,7 +23,14 @@ type Item = {
   reentryReason: string | null; partialWorkAllowed: boolean; possibleDuplicate: boolean;
   proposedBillingCode: string | null; reviewStatus: string; mappedTaskTypeId: string | null;
   confirmedJobCode: string | null; quantity: number | null; resultingTaskId: string | null;
+  reviewResolution: string; reviewNote: string | null;
 };
+
+const RESOLUTION_OPTIONS = [
+  { value: 'CONFIRMED', label: 'Confirm' },
+  { value: 'CORRECTED', label: 'Correct' },
+  { value: 'EXCLUDED', label: 'Exclude' },
+] as const;
 type Source = { id: string; kind: string; originalFilename: string | null; sizeBytes: number | null; sentToAi: boolean };
 type Intake = {
   id: string; intakeNumber: string; status: string; title: string | null;
@@ -112,18 +119,45 @@ export function IntakeReviewContent({ id }: { id: string }) {
     } catch (e: any) { toast.error(e.message || 'Save failed'); } finally { setBusy(false); }
   };
 
+  // Blocker 3 - persist an operator resolution for a flagged item immediately
+  // (validated enum). This is the authoritative record the approval gate reads.
+  const resolveItem = async (itemId: string, value: string, note?: string | null) => {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/ai-intake/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [{ id: itemId, reviewResolution: value, ...(note !== undefined ? { reviewNote: note } : {}) }] }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Failed to save resolution');
+      setIntake(d.intake);
+      toast.success('Review resolution saved');
+    } catch (e: any) { toast.error(e.message || 'Failed to save resolution'); } finally { setBusy(false); }
+  };
+
   const doApprove = async () => {
     if (!intake) return;
     if (!jobName.trim()) { toast.error('Enter a work order name'); return; }
-    const itemDecisions = intake.items
-      .filter((it) => included[it.id])
+    const includedItems = intake.items.filter((it) => included[it.id]);
+    // Blocker 3 (client guard) - a flagged item that is still unresolved cannot
+    // be operationalized. Excluded flagged items are simply omitted. The server
+    // enforces the same rule authoritatively from the persisted column.
+    const unresolved = includedItems.filter(
+      (it) => (it.requiresReview || it.possibleDuplicate) && it.reviewResolution === 'PENDING',
+    );
+    if (unresolved.length > 0) {
+      toast.error('Resolve every flagged item (confirm, correct, or exclude) before creating the work order');
+      return;
+    }
+    const itemDecisions = includedItems
+      .filter((it) => !((it.requiresReview || it.possibleDuplicate) && it.reviewResolution === 'EXCLUDED'))
       .map((it) => ({
         itemId: it.id,
         taskTypeId: (itemVal(it, 'mappedTaskTypeId') as string) || '',
         jobCode: (itemVal(it, 'confirmedJobCode') as string) || null,
         quantity: (itemVal(it, 'quantity') as number) || 1,
       }));
-    if (itemDecisions.length === 0) { toast.error('Select at least one item'); return; }
+    if (itemDecisions.length === 0) { toast.error('Select at least one item to include (all selected items are excluded)'); return; }
     const missing = itemDecisions.filter((d) => !d.taskTypeId);
     if (missing.length > 0) { toast.error('Every selected item needs a Task Type'); return; }
     setBusy(true);
@@ -299,10 +333,24 @@ export function IntakeReviewContent({ id }: { id: string }) {
                       </TableCell>
                       <TableCell>{confidenceBadge(it.confidence)}</TableCell>
                       <TableCell>
-                        {it.requiresReview
+                        {(it.requiresReview || it.possibleDuplicate)
                           ? <Badge className="bg-amber-100 text-amber-800" variant="secondary" title={it.reviewReason || ''}>Review</Badge>
                           : <Badge className="bg-emerald-100 text-emerald-700" variant="secondary">OK</Badge>}
                         {it.reviewReason && <div className="text-xs text-muted-foreground mt-0.5 max-w-[160px]">{it.reviewReason}</div>}
+                        {(it.requiresReview || it.possibleDuplicate) && !finalized && (
+                          <div className="mt-1">
+                            <Select value={it.reviewResolution === 'PENDING' ? '' : it.reviewResolution} onValueChange={(v) => resolveItem(it.id, v)}>
+                              <SelectTrigger className="h-7 w-28 text-xs"><SelectValue placeholder="Resolve…" /></SelectTrigger>
+                              <SelectContent>{RESOLUTION_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+                            </Select>
+                            {it.reviewResolution === 'PENDING'
+                              ? <div className="text-xs text-rose-600 mt-0.5">must resolve</div>
+                              : <div className="text-xs text-emerald-700 mt-0.5">{it.reviewResolution.toLowerCase()}</div>}
+                          </div>
+                        )}
+                        {(it.requiresReview || it.possibleDuplicate) && finalized && it.reviewResolution !== 'PENDING' && (
+                          <div className="text-xs text-muted-foreground mt-0.5">resolved: {it.reviewResolution.toLowerCase()}</div>
+                        )}
                       </TableCell>
                       {!finalized && (
                         <TableCell>

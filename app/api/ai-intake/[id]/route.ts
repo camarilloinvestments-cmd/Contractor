@@ -23,9 +23,18 @@ export async function GET(_request: Request, { params }: Params) {
   return NextResponse.json({ intake });
 }
 
+// Validated operator resolution values for a flagged item (Blocker 3). Only
+// these enum values are accepted from the client - never a free-form string.
+const REVIEW_RESOLUTIONS = ['PENDING', 'CONFIRMED', 'CORRECTED', 'EXCLUDED'] as const;
+type ReviewResolution = (typeof REVIEW_RESOLUTIONS)[number];
+function isReviewResolution(v: unknown): v is ReviewResolution {
+  return typeof v === 'string' && (REVIEW_RESOLUTIONS as readonly string[]).includes(v);
+}
+
 // PATCH /api/ai-intake/:id -> operator edits to the draft (never AI).
 // Accepts { title?, pastedText?, items: [{ id, instructions?, proposedType?,
-//   routeSection?, mappedTaskTypeId?, confirmedJobCode?, quantity?, reviewStatus? }] }
+//   routeSection?, mappedTaskTypeId?, confirmedJobCode?, quantity?, reviewStatus?,
+//   reviewResolution?, reviewNote? }] }
 export async function PATCH(request: Request, { params }: Params) {
   const gate = await requireManage();
   if ('res' in gate) return gate.res;
@@ -57,6 +66,27 @@ export async function PATCH(request: Request, { params }: Params) {
     if (typeof upd.confirmedJobCode === 'string') data.confirmedJobCode = upd.confirmedJobCode;
     if (upd.quantity === null || typeof upd.quantity === 'number') data.quantity = upd.quantity;
     if (typeof upd.reviewStatus === 'string') data.reviewStatus = upd.reviewStatus;
+    // Blocker 3 - persisted, validated review resolution. Reject anything that
+    // is not one of the approved enum values (400) rather than storing junk.
+    if (upd.reviewResolution !== undefined) {
+      if (!isReviewResolution(upd.reviewResolution)) {
+        return NextResponse.json(
+          { error: `Invalid reviewResolution; must be one of ${REVIEW_RESOLUTIONS.join(', ')}` },
+          { status: 400 },
+        );
+      }
+      data.reviewResolution = upd.reviewResolution;
+      // Audit the resolver for any non-PENDING (explicit) decision.
+      if (upd.reviewResolution === 'PENDING') {
+        data.reviewedById = null;
+        data.reviewedAt = null;
+      } else {
+        data.reviewedById = actor.id;
+        data.reviewedAt = new Date();
+      }
+    }
+    if (typeof upd.reviewNote === 'string') data.reviewNote = upd.reviewNote.slice(0, 2000);
+    else if (upd.reviewNote === null) data.reviewNote = null;
     if (Object.keys(data).length === 0) continue;
     ops.push(prisma.aiIntakeItem.update({ where: { id: upd.id }, data }));
   }

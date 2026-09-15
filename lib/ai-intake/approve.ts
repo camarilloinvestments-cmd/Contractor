@@ -6,9 +6,10 @@
 // billing code when the operator confirms a jobCode that resolves in the WO's
 // PINNED price book version. Everything financial derives from that pinned
 // snapshot + operator-supplied payout, never from anything OpenAI returned.
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { writeAudit } from '@/lib/audit';
-import { createWithNumber } from '@/lib/documents/numbering';
+import { allocateNumber } from '@/lib/documents/numbering';
 import { resolveWorkOrderPin, addBillingCodeToTask } from '@/lib/work-orders';
 import type { ActorMeta, ReqMeta } from './analyze';
 
@@ -69,115 +70,208 @@ export async function approveIntake(
   if (included.length === 0) {
     throw new AiApproveError('Select at least one item to create as a task');
   }
+
+  // Blocker 3 - server-enforced review gate. A flagged item (requiresReview OR
+  // possibleDuplicate) must carry an explicit, PERSISTED operator resolution
+  // before it can be operationalized. EXCLUDED items are omitted (never tasked);
+  // only CONFIRMED/CORRECTED may proceed; a still-PENDING flagged item that the
+  // operator tried to include REJECTS the whole approval. This cannot be
+  // bypassed from the client - the decision comes from the persisted column.
+  const operational: typeof included = [];
   for (const it of included) {
     const d = decisionsByItem.get(it.id)!;
     if (!d.taskTypeId) {
       throw new AiApproveError(`Item ${it.deviceId ?? it.id} requires a task type before it can be created`);
     }
+    const flagged = it.requiresReview || it.possibleDuplicate;
+    if (flagged) {
+      if (it.reviewResolution === 'EXCLUDED') {
+        continue; // operator excluded this flagged item - omit, do not task
+      }
+      if (it.reviewResolution !== 'CONFIRMED' && it.reviewResolution !== 'CORRECTED') {
+        throw new AiApproveError(
+          `Item ${it.deviceId ?? it.id} is flagged for review and must be resolved (confirm, correct, or exclude) before approval`,
+        );
+      }
+    }
+    operational.push(it);
+  }
+  if (operational.length === 0) {
+    throw new AiApproveError('No items remain to create as tasks after review exclusions');
   }
 
-  // Resolve + pin the exact (prime, project, book, version) - operator override honored.
+  // Resolve + pin the exact (prime, project, book, version) - operator override
+  // honored. Read-only; safe to resolve before opening the write transaction.
   const pin = await resolveWorkOrderPin({
     projectId: intake.projectId,
     overrideVersionId: input.overrideVersionId ?? null,
   });
 
-  // Create the work order (DRAFT) with a concurrency-safe number.
-  const job = await createWithNumber('WORKORDER', (jobNumber) =>
-    prisma.job.create({
-      data: {
-        jobNumber,
-        jobName: input.jobName.trim(),
-        primeContractorId: pin.primeContractorId,
-        projectId: pin.projectId,
-        priceBookId: pin.priceBookId,
-        priceBookVersionId: pin.priceBookVersionId,
-        status: 'DRAFT',
-        notes: `Created from AI work intake ${intake.intakeNumber}`,
-      },
-    }),
-  );
+  // Blocker 2 - atomic, concurrency-safe conversion. Everything (claim + WO +
+  // Tasks + price snapshots + item->task links + resultingJobId + IMPORTED) is
+  // committed or rolled back together inside ONE interactive transaction. A
+  // concurrency-safe claim (status -> APPROVING via conditional updateMany)
+  // ensures a single intake yields at most one work order even under concurrent
+  // approvals or a retried lost-response request.
+  const MAX_ATTEMPTS = 5;
+  let result: { job: Awaited<ReturnType<typeof prisma.job.create>>; taskCount: number } | null = null;
+  let alreadyImported: { job: Awaited<ReturnType<typeof prisma.job.findUnique>>; } | null = null;
 
-  // Create one Task per included item. Billing-code tasks snapshot from the
-  // pinned version; items without a confirmed jobCode become plain tasks.
-  const createdTaskIds: { itemId: string; taskId: string }[] = [];
-  for (const it of included) {
-    const d = decisionsByItem.get(it.id)!;
-    const qty = typeof d.quantity === 'number' && d.quantity > 0 ? d.quantity : 1;
-    const description = d.description ?? it.instructions ?? it.deviceId ?? null;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      const txResult = await prisma.$transaction(
+        async (tx) => {
+          // (1) Concurrency-safe claim: only ONE caller can move a fresh intake
+          // into APPROVING. Others match zero rows and branch on the live state.
+          const claim = await tx.aiWorkIntake.updateMany({
+            where: {
+              id: intakeId,
+              resultingJobId: null,
+              status: { notIn: ['IMPORTED', 'APPROVING', 'REJECTED'] },
+            },
+            data: { status: 'APPROVING' },
+          });
+          if (claim.count !== 1) {
+            const cur = await tx.aiWorkIntake.findUnique({
+              where: { id: intakeId },
+              select: { resultingJobId: true, status: true },
+            });
+            if (cur?.resultingJobId) {
+              const existing = await tx.job.findUnique({ where: { id: cur.resultingJobId } });
+              return { kind: 'existing' as const, job: existing };
+            }
+            throw new AiApproveError('Intake is already being approved or imported');
+          }
 
-    let taskId: string;
-    if (d.jobCode && d.jobCode.trim()) {
-      // Operator-confirmed billing code -> resolve from pinned version.
-      const task = await addBillingCodeToTask({
-        jobId: job.id,
-        taskTypeId: d.taskTypeId,
-        jobCode: d.jobCode.trim(),
-        quantity: qty,
-        workerId: d.workerId ?? null,
-        workerPayoutRate: typeof d.workerPayoutRate === 'number' ? d.workerPayoutRate : 0,
-        description,
-      });
-      taskId = task.id;
-    } else {
-      // Plain task (no billing code yet) - no prime rate snapshot.
-      const payoutRate = typeof d.workerPayoutRate === 'number' ? d.workerPayoutRate : 0;
-      const costAmount = Math.round(payoutRate * qty);
-      const task = await prisma.task.create({
-        data: {
-          jobId: job.id,
-          taskTypeId: d.taskTypeId,
-          description,
-          quantity: qty,
-          billingRate: 0,
-          workerPayoutRate: payoutRate,
-          workerId: d.workerId ?? null,
-          billableAmount: 0,
-          costAmount,
-          profitAmount: -costAmount,
+          // (2) Allocate the WO number on the SAME tx client.
+          const jobNumber = await allocateNumber('WORKORDER', tx);
+
+          // (3) Create the work order (DRAFT), pinned.
+          const job = await tx.job.create({
+            data: {
+              jobNumber,
+              jobName: input.jobName.trim(),
+              primeContractorId: pin.primeContractorId,
+              projectId: pin.projectId,
+              priceBookId: pin.priceBookId,
+              priceBookVersionId: pin.priceBookVersionId,
+              status: 'DRAFT',
+              notes: `Created from AI work intake ${intake.intakeNumber}`,
+            },
+          });
+
+          // (4) One Task per operational item, all on the same tx.
+          const createdTaskIds: { itemId: string; taskId: string }[] = [];
+          for (const it of operational) {
+            const d = decisionsByItem.get(it.id)!;
+            const qty = typeof d.quantity === 'number' && d.quantity > 0 ? d.quantity : 1;
+            const description = d.description ?? it.instructions ?? it.deviceId ?? null;
+            // Blocker 4 - durable, non-financial device/work identifier snapshot.
+            const sourceWorkRef = it.deviceId ?? null;
+
+            let taskId: string;
+            if (d.jobCode && d.jobCode.trim()) {
+              const task = await addBillingCodeToTask({
+                jobId: job.id,
+                taskTypeId: d.taskTypeId,
+                jobCode: d.jobCode.trim(),
+                quantity: qty,
+                workerId: d.workerId ?? null,
+                workerPayoutRate: typeof d.workerPayoutRate === 'number' ? d.workerPayoutRate : 0,
+                description,
+                sourceWorkRef,
+                tx,
+              });
+              taskId = task.id;
+            } else {
+              const payoutRate = typeof d.workerPayoutRate === 'number' ? d.workerPayoutRate : 0;
+              const costAmount = Math.round(payoutRate * qty);
+              const task = await tx.task.create({
+                data: {
+                  jobId: job.id,
+                  taskTypeId: d.taskTypeId,
+                  description,
+                  quantity: qty,
+                  billingRate: 0,
+                  workerPayoutRate: payoutRate,
+                  workerId: d.workerId ?? null,
+                  sourceWorkRef,
+                  billableAmount: 0,
+                  costAmount,
+                  profitAmount: -costAmount,
+                },
+              });
+              taskId = task.id;
+            }
+            createdTaskIds.push({ itemId: it.id, taskId });
+          }
+
+          // (5) Link items -> tasks (in the same tx).
+          for (const { itemId, taskId } of createdTaskIds) {
+            await tx.aiIntakeItem.update({
+              where: { id: itemId },
+              data: {
+                resultingTaskId: taskId,
+                reviewStatus: 'APPROVED',
+                confirmedJobCode: decisionsByItem.get(itemId)?.jobCode?.trim() || null,
+                mappedTaskTypeId: decisionsByItem.get(itemId)?.taskTypeId || null,
+              },
+            });
+          }
+
+          // (6) Finalize: IMPORTED + resultingJobId. Committed atomically with all
+          // of the above; if anything above threw, the APPROVING claim rolls back.
+          await tx.aiWorkIntake.update({
+            where: { id: intakeId },
+            data: {
+              status: 'IMPORTED',
+              approvedById: actor.id,
+              approvedAt: new Date(),
+              resultingJobId: job.id,
+            },
+          });
+
+          return { kind: 'created' as const, job, taskCount: createdTaskIds.length };
         },
-      });
-      taskId = task.id;
+        { timeout: 20000 },
+      );
+
+      if (txResult.kind === 'existing') {
+        alreadyImported = { job: txResult.job };
+      } else {
+        result = { job: txResult.job, taskCount: txResult.taskCount };
+      }
+      break;
+    } catch (err) {
+      // Retry only on a unique-violation (concurrent number allocation). The
+      // aborted transaction rolls back the APPROVING claim, so a retry re-claims
+      // cleanly. Any other error propagates (transaction already rolled back).
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002' && attempt < MAX_ATTEMPTS - 1) {
+        continue;
+      }
+      throw err;
     }
-    createdTaskIds.push({ itemId: it.id, taskId });
   }
 
-  // Link items -> tasks and mark the intake IMPORTED.
-  await prisma.$transaction([
-    ...createdTaskIds.map(({ itemId, taskId }) =>
-      prisma.aiIntakeItem.update({
-        where: { id: itemId },
-        data: {
-          resultingTaskId: taskId,
-          reviewStatus: 'APPROVED',
-          confirmedJobCode: decisionsByItem.get(itemId)?.jobCode?.trim() || null,
-          mappedTaskTypeId: decisionsByItem.get(itemId)?.taskTypeId || null,
-        },
-      }),
-    ),
-    prisma.aiWorkIntake.update({
-      where: { id: intakeId },
-      data: {
-        status: 'IMPORTED',
-        approvedById: actor.id,
-        approvedAt: new Date(),
-        resultingJobId: job.id,
-      },
-    }),
-  ]);
+  if (alreadyImported) {
+    return { job: alreadyImported.job, alreadyImported: true };
+  }
+  if (!result) {
+    throw new AiApproveError('Unable to allocate a work order number after multiple attempts');
+  }
 
   await writeAudit({
     actor, action: 'ai_intake.approved', entityType: 'AiWorkIntake', entityId: intakeId,
-    metadata: { jobId: job.id, jobNumber: job.jobNumber, itemCount: createdTaskIds.length },
+    metadata: { jobId: result.job.id, jobNumber: result.job.jobNumber, itemCount: result.taskCount },
     ...reqMeta,
   });
   await writeAudit({
-    actor, action: 'ai_intake.work_order_created', entityType: 'Job', entityId: job.id,
-    metadata: { intakeId, intakeNumber: intake.intakeNumber, taskCount: createdTaskIds.length },
+    actor, action: 'ai_intake.work_order_created', entityType: 'Job', entityId: result.job.id,
+    metadata: { intakeId, intakeNumber: intake.intakeNumber, taskCount: result.taskCount },
     ...reqMeta,
   });
 
-  return { job, alreadyImported: false, taskCount: createdTaskIds.length };
+  return { job: result.job, alreadyImported: false, taskCount: result.taskCount };
 }
 
 export async function rejectIntake(

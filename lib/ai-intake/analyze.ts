@@ -102,7 +102,7 @@ export async function analyzeIntake(intakeId: string, actor: ActorMeta, reqMeta:
     // First pass. Hard visual sources (drawings/PDF) prefer the stronger model.
     let call = await runExtraction({
       apiKey,
-      apiBase: settingsRow.apiBase || 'https://api.openai.com/v1',
+      apiBase: settingsRow.apiBase, // Blocker 1: validated + pinned to official endpoint server-side
       normalModel: settingsRow.normalModel,
       fallbackModel: settingsRow.fallbackModel,
       messages,
@@ -116,7 +116,7 @@ export async function analyzeIntake(intakeId: string, actor: ActorMeta, reqMeta:
     if ((!validated || !validated.success) && !call.usedFallback) {
       call = await runExtraction({
         apiKey,
-        apiBase: settingsRow.apiBase || 'https://api.openai.com/v1',
+        apiBase: settingsRow.apiBase, // Blocker 1: validated + pinned to official endpoint server-side
         normalModel: settingsRow.fallbackModel, // force stronger model
         fallbackModel: settingsRow.fallbackModel,
         messages,

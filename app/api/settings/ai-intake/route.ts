@@ -14,7 +14,8 @@ export async function GET() {
 }
 
 // PUT /api/settings/ai-intake  (ADMIN only)
-// Body: { enabled, apiKey?: { password, clear }, apiBase?, normalModel?, fallbackModel? }
+// Body: { enabled, apiKey?: { password, clear }, normalModel?, fallbackModel? }
+// (apiBase is intentionally not accepted — Blocker 1: endpoint pinned server-side.)
 export async function PUT(request: Request) {
   const gate = await requireAdmin();
   if ('res' in gate) return gate.res;
@@ -28,7 +29,7 @@ export async function PUT(request: Request) {
       enabled: !!body.enabled,
       apiKey: cred && typeof cred.password === 'string' && cred.password.length > 0 ? cred.password : undefined,
       clearApiKey: cred?.clear === true,
-      apiBase: typeof body.apiBase === 'string' ? body.apiBase : undefined,
+      // Blocker 1: apiBase is no longer operator-editable; endpoint is pinned server-side.
       normalModel: typeof body.normalModel === 'string' ? body.normalModel : undefined,
       fallbackModel: typeof body.fallbackModel === 'string' ? body.fallbackModel : undefined,
     });

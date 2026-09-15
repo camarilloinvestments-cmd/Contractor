@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Loader2, Save, PlugZap, ShieldAlert, ShieldCheck, Bot, CheckCircle2, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
@@ -58,7 +59,6 @@ export function AiSettingsContent() {
         body: JSON.stringify({
           enabled: s.enabled,
           apiKey: cred,
-          apiBase: s.apiBase,
           normalModel: s.normalModel,
           fallbackModel: s.fallbackModel,
         }),
@@ -138,8 +138,13 @@ export function AiSettingsContent() {
           </div>
 
           <div className="grid gap-2">
-            <Label>API Base URL</Label>
-            <Input value={s.apiBase ?? ''} onChange={(e) => set('apiBase', e.target.value)} placeholder="https://api.openai.com/v1" />
+            <Label>API Endpoint</Label>
+            <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+              <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+              <span className="font-mono">https://api.openai.com/v1</span>
+              <Badge variant="secondary" className="ml-auto">Pinned</Badge>
+            </div>
+            <p className="text-xs text-muted-foreground">The API endpoint is fixed to the official OpenAI API and cannot be changed. Your API key is only ever sent to this endpoint.</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

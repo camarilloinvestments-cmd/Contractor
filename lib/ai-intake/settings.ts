@@ -28,7 +28,10 @@ export type AiIntakeSettingsInput = {
   enabled?: boolean;
   apiKey?: string | null; // plaintext from the form; empty/undefined = keep existing
   clearApiKey?: boolean;
-  apiBase?: string | null;
+  // NOTE (Blocker 1): apiBase is intentionally NOT accepted. The API endpoint is
+  // pinned to the official OpenAI API server-side (lib/ai-intake/openai-endpoint.ts).
+  // The legacy column is retained for backward-compat but is never written from
+  // operator input, and is validated (not trusted) at request time.
   normalModel?: string | null;
   fallbackModel?: string | null;
 };
@@ -89,7 +92,6 @@ export function getDecryptedApiKey(row: { apiKeyEncrypted: string | null }): str
 export async function saveAiIntakeSettings(input: AiIntakeSettingsInput): Promise<AiIntakeSettingsPublic> {
   const data: Record<string, unknown> = {
     enabled: input.enabled,
-    apiBase: input.apiBase,
     normalModel: input.normalModel,
     fallbackModel: input.fallbackModel,
   };
