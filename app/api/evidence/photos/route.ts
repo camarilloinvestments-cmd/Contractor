@@ -36,7 +36,7 @@ export async function GET(req: Request) {
   });
 
   const items = await Promise.all(
-    rows.map(async (r) => {
+    rows.map(async (r: any) => {
       let watermarkedUrl: string | null = null;
       if (r.watermarkedStoragePath) {
         try {

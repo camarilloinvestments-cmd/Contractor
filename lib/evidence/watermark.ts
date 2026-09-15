@@ -4,8 +4,8 @@
 // panel (company branding + work/GPS context) onto a copy. The original is
 // never mutated — callers persist both objects with separate SHA-256 hashes.
 //
-// Branding is resolved from the SAME shared source used by invoices/quotes/
-// statements (lib/branding.ts) — there is no second logo system (§6).
+// Branding is resolved from the SAME shared source used by billing documents
+// (lib/branding.ts) — there is no second logo system (§6).
 
 import sharp from 'sharp';
 import { getCompanyProfile, getBrandingLogoBytes, type CompanyBranding } from '@/lib/branding';
@@ -41,6 +41,8 @@ export interface WatermarkContext {
   address?: string | null;
   capturedAt: Date;
   evidenceRef: string;
+  /** IANA timezone for visible date/time on watermark (e.g. 'America/Chicago'). Defaults to UTC. */
+  fieldTimezone?: string | null;
 }
 
 export interface WatermarkResult {
@@ -58,11 +60,25 @@ function escapeXml(s: string): string {
     .replace(/'/g, '&apos;');
 }
 
-function fmtDate(d: Date): string {
-  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit', timeZone: 'UTC' });
+/** Validate an IANA timezone name at runtime. Returns it if valid, else 'UTC'. */
+function safeTimezone(tz: string | null | undefined): string {
+  if (!tz) return 'UTC';
+  try { Intl.DateTimeFormat('en-US', { timeZone: tz }); return tz; } catch { return 'UTC'; }
 }
-function fmtTime(d: Date): string {
-  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'UTC' }) + ' UTC';
+
+/** Short timezone abbreviation (e.g. 'CDT', 'EST', 'UTC'). */
+function tzAbbrev(d: Date, tz: string): string {
+  try {
+    const parts = Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'short' }).formatToParts(d);
+    return parts.find(p => p.type === 'timeZoneName')?.value ?? tz;
+  } catch { return tz; }
+}
+
+function fmtDate(d: Date, tz: string): string {
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit', timeZone: tz });
+}
+function fmtTime(d: Date, tz: string): string {
+  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: tz }) + ' ' + tzAbbrev(d, tz);
 }
 
 /** Build the list of text lines to render, honoring the per-field toggles. */
@@ -78,9 +94,10 @@ export function buildWatermarkLines(
   if (settings.showTaskCode && ctx.taskCode) lines.push(`Task/Code: ${ctx.taskCode}`);
   if (settings.showTechnician && ctx.technicianName) lines.push(`Tech: ${ctx.technicianName}`);
 
+  const tz = safeTimezone(ctx.fieldTimezone);
   const dt: string[] = [];
-  if (settings.showDate) dt.push(fmtDate(ctx.capturedAt));
-  if (settings.showTime) dt.push(fmtTime(ctx.capturedAt));
+  if (settings.showDate) dt.push(fmtDate(ctx.capturedAt, tz));
+  if (settings.showTime) dt.push(fmtTime(ctx.capturedAt, tz));
   if (dt.length) lines.push(dt.join('  '));
 
   if (settings.showGpsCoords && ctx.latitude != null && ctx.longitude != null) {
@@ -97,7 +114,7 @@ export function buildWatermarkLines(
 }
 
 /**
- * Generate a watermarked derivative from the original image bytes.
+ * Produce a watermarked derivative from the original image bytes.
  * Returns a NEW buffer; the input buffer is not modified.
  */
 export async function generateWatermark(

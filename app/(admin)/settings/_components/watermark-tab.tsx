@@ -157,6 +157,27 @@ export function WatermarkTab() {
               accuracy are flagged for review but the location is never fabricated.
             </AlertDescription>
           </Alert>
+          <div className="grid gap-4 sm:grid-cols-2 pt-4">
+            <div className="space-y-2">
+              <Label>Field timezone (watermark display)</Label>
+              <Input
+                placeholder="America/Chicago"
+                value={(s as any).fieldTimezone ?? 'America/Chicago'}
+                onChange={(e) => set('fieldTimezone', e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">IANA timezone for watermark date/time. Internal timestamps remain UTC.</p>
+            </div>
+            <div className="space-y-2">
+              <Label>Reverse geocode provider</Label>
+              <Select value={(s as any).geocodeProvider || 'nominatim'} onValueChange={(v) => set('geocodeProvider', v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="nominatim">Nominatim (OpenStreetMap, free)</SelectItem>
+                  <SelectItem value="none">None — coordinates only</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </CardContent>
       </Card>
 

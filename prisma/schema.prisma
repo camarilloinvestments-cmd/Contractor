@@ -2008,6 +2008,8 @@ model WatermarkSettings {
   opacityPercent    Int      @default(55) // panel opacity 0-100
   gpsPolicy         String   @default("REQUIRED") // REQUIRED | WARN | OPTIONAL
   maxAccuracyMeters Int      @default(30) // company max acceptable accuracy
+  fieldTimezone     String   @default("America/Chicago") // IANA timezone for watermark display
+  geocodeProvider   String   @default("nominatim") // nominatim | none
   updatedAt         DateTime @updatedAt
 }
 
@@ -2063,6 +2065,9 @@ model FieldPhotoEvidence {
   // Tamper / audit (§9).
   capturedAt             DateTime // device timestamp of capture (field truth, not upload)
   receivedAt             DateTime @default(now()) // server receipt
+  uploadedAt             DateTime? // successful object upload confirmation time
+  addressLookupAt        DateTime? // reverse-geocode lookup timestamp
+  addressProvider        String? // geocode provider used
   status                 String   @default("UPLOADED") // UPLOADED | WATERMARKED | FAILED | SUPERSEDED
   notes                  String?
 
@@ -2080,4 +2085,21 @@ model FieldPhotoEvidence {
   @@index([capturedByUserId])
   @@index([status])
   @@index([capturedAt])
+}
+
+model EvidenceUploadReservation {
+  id                String   @id @default(cuid())
+  userId            String
+  workerId          String
+  jobId             String
+  taskId            String
+  storagePath       String   @unique // server-generated S3 key
+  contentType       String   @default("image/jpeg")
+  maxSizeBytes      Int      @default(20971520) // 20 MB
+  consumed          Boolean  @default(false)
+  expiresAt         DateTime
+  createdAt         DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }

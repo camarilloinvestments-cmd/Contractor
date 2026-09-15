@@ -93,6 +93,7 @@
     "formik": "2.4.5",
     "framer-motion": "12.23.12",
     "gray-matter": "4.0.3",
+    "idb": "^8.0.3",
     "input-otp": "1.2.4",
     "jotai": "2.10.0",
     "jsonwebtoken": "9.0.2",

@@ -13,6 +13,8 @@ export const WATERMARK_SETTINGS_ID = 'default';
 export interface WatermarkSettingsShape extends WatermarkFieldSettings {
   gpsPolicy: string; // REQUIRED | WARN | OPTIONAL
   maxAccuracyMeters: number;
+  fieldTimezone: string; // IANA timezone for watermark display
+  geocodeProvider: string; // nominatim | none
 }
 
 export const DEFAULT_WATERMARK_SETTINGS: WatermarkSettingsShape = {
@@ -34,6 +36,8 @@ export const DEFAULT_WATERMARK_SETTINGS: WatermarkSettingsShape = {
   opacityPercent: 55,
   gpsPolicy: 'REQUIRED',
   maxAccuracyMeters: 30,
+  fieldTimezone: 'America/Chicago',
+  geocodeProvider: 'nominatim',
 };
 
 /** Load the watermark settings singleton, falling back to safe defaults. */
@@ -60,6 +64,8 @@ export async function getWatermarkSettings(): Promise<WatermarkSettingsShape> {
       opacityPercent: row.opacityPercent,
       gpsPolicy: row.gpsPolicy,
       maxAccuracyMeters: row.maxAccuracyMeters,
+      fieldTimezone: (row as any).fieldTimezone ?? 'America/Chicago',
+      geocodeProvider: (row as any).geocodeProvider ?? 'nominatim',
     };
   } catch {
     return { ...DEFAULT_WATERMARK_SETTINGS };
@@ -123,6 +129,7 @@ export async function generateAndPersistWatermark(evidenceId: string): Promise<v
       address: rec.address,
       capturedAt: rec.capturedAt,
       evidenceRef: rec.evidenceRef,
+      fieldTimezone: settings.fieldTimezone,
     };
 
     const result = await generateWatermark(originalBytes, settings, ctx, branding);

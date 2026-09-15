@@ -9190,6 +9190,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"idb@npm:^8.0.3":
+  version: 8.0.3
+  resolution: "idb@npm:8.0.3"
+  checksum: 10c0/421cd9a3281b7564528857031cc33fd9e95753f8191e483054cb25d1ceea7303a0d1462f4f69f5b41606f0f066156999e067478abf2460dfcf9cab80dae2a2b2
+  languageName: node
+  linkType: hard
+
 "ieee754@npm:^1.1.12, ieee754@npm:^1.1.13":
   version: 1.2.1
   resolution: "ieee754@npm:1.2.1"
@@ -11036,6 +11043,7 @@ __metadata:
     formik: "npm:2.4.5"
     framer-motion: "npm:12.23.12"
     gray-matter: "npm:4.0.3"
+    idb: "npm:^8.0.3"
     input-otp: "npm:1.2.4"
     jotai: "npm:2.10.0"
     jsonwebtoken: "npm:9.0.2"

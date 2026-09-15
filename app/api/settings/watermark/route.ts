@@ -69,6 +69,21 @@ export async function PUT(req: Request) {
       }
       data.maxAccuracyMeters = ma;
     }
+    if ('fieldTimezone' in body) {
+      const tz = String(body.fieldTimezone).trim();
+      // Validate IANA timezone.
+      try { Intl.DateTimeFormat('en-US', { timeZone: tz }); } catch {
+        return NextResponse.json({ error: 'Invalid IANA timezone' }, { status: 400 });
+      }
+      data.fieldTimezone = tz;
+    }
+    if ('geocodeProvider' in body) {
+      const gp = String(body.geocodeProvider).toLowerCase();
+      if (!['nominatim', 'none'].includes(gp)) {
+        return NextResponse.json({ error: 'Invalid geocode provider. Allowed: nominatim, none' }, { status: 400 });
+      }
+      data.geocodeProvider = gp;
+    }
 
     const saved = await prisma.watermarkSettings.upsert({
       where: { id: WATERMARK_SETTINGS_ID },

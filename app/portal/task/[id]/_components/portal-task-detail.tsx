@@ -5,11 +5,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge } from '@/components/status-badge';
-import { ArrowLeft, Play, Camera, FileUp, MessageSquare, Send, MapPin, AlertTriangle, Loader2, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Play, Camera, FileUp, MessageSquare, Send, MapPin, AlertTriangle, Loader2, ShieldCheck, WifiOff, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { FadeIn } from '@/components/ui/animate';
 import { formatDate } from '@/lib/utils/format';
+import {
+  enqueueEvidence, listQueue, processQueue, pendingCount,
+  type QueuedEvidence, type QueueStatus,
+} from '@/lib/evidence/offline-queue';
 
 interface GpsData {
   latitude: number | null;
@@ -26,6 +30,8 @@ export function PortalTaskDetail({ id }: { id: string }) {
   const [note, setNote] = useState('');
   const [uploading, setUploading] = useState(false);
   const [evidenceUploading, setEvidenceUploading] = useState(false);
+  const [evidenceQueue, setEvidenceQueue] = useState<QueuedEvidence[]>([]);
+  const [queueProcessing, setQueueProcessing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const fetchData = useCallback(() => {
@@ -98,8 +104,46 @@ export function PortalTaskDetail({ id }: { id: string }) {
     });
   }, []);
 
-  // Tamper-evident field photo evidence: capture fresh GPS, upload the ORIGINAL,
-  // then register it so the server can hash it and generate the watermark.
+  // Load evidence queue from IndexedDB on mount.
+  const refreshQueue = useCallback(async () => {
+    try {
+      const all = await listQueue();
+      setEvidenceQueue(all.filter(q => q.taskId === id));
+    } catch { /* IDB unavailable */ }
+  }, [id]);
+  useEffect(() => { refreshQueue(); }, [refreshQueue]);
+
+  // Auto-process queue when connectivity returns.
+  useEffect(() => {
+    const handler = async () => {
+      if (!navigator.onLine) return;
+      const count = await pendingCount();
+      if (count > 0) {
+        setQueueProcessing(true);
+        const ok = await processQueue();
+        if (ok > 0) { toast.success(`${ok} queued evidence photo(s) uploaded`); fetchData(); }
+        await refreshQueue();
+        setQueueProcessing(false);
+      }
+    };
+    window.addEventListener('online', handler);
+    // Also try once on mount.
+    handler();
+    return () => window.removeEventListener('online', handler);
+  }, [refreshQueue, fetchData]);
+
+  const handleRetryQueue = async () => {
+    setQueueProcessing(true);
+    const ok = await processQueue();
+    if (ok > 0) { toast.success(`${ok} evidence photo(s) uploaded`); fetchData(); }
+    else toast.info('No items processed — check connectivity');
+    await refreshQueue();
+    setQueueProcessing(false);
+  };
+
+  // Tamper-evident field photo evidence: capture fresh GPS, queue to IndexedDB,
+  // then attempt reserve → upload → register. If offline/failed, item stays
+  // queued and will be retried automatically or manually.
   const handleEvidencePhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e?.target?.files?.[0];
     if (e?.target) e.target.value = '';
@@ -112,47 +156,41 @@ export function PortalTaskDetail({ id }: { id: string }) {
       const fresh = await getFreshGps();
       setGps({ latitude: fresh.latitude, longitude: fresh.longitude, accuracy: fresh.accuracy });
 
-      const presignRes = await fetch('/api/upload/presigned', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileName: file.name, contentType: file.type, isPublic: false }),
+      // §4: Immediately persist to IndexedDB (survives page close / poor signal).
+      const queued = await enqueueEvidence({
+        localUuid,
+        photoBlob: file,
+        fileName: file.name,
+        contentType: file.type || 'image/jpeg',
+        capturedAt,
+        locationCapturedAt: fresh.timestamp ? new Date(fresh.timestamp).toISOString() : null,
+        latitude: fresh.latitude,
+        longitude: fresh.longitude,
+        gpsAccuracyMeters: fresh.accuracy,
+        altitude: fresh.altitude,
+        heading: fresh.heading,
+        speed: fresh.speed,
+        jobId: task.job.id,
+        taskId: id,
       });
-      if (!presignRes.ok) throw new Error('Failed to prepare upload');
-      const { uploadUrl, cloud_storage_path } = await presignRes.json();
+      toast.info('Evidence photo queued locally');
+      await refreshQueue();
 
-      await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
-
-      const res = await fetch('/api/portal/photo-evidence', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          localUuid,
-          jobId: task.job.id,
-          taskId: id,
-          originalStoragePath: cloud_storage_path,
-          originalFileName: file.name,
-          originalContentType: file.type || 'image/jpeg',
-          latitude: fresh.latitude,
-          longitude: fresh.longitude,
-          gpsAccuracyMeters: fresh.accuracy,
-          altitude: fresh.altitude,
-          heading: fresh.heading,
-          speed: fresh.speed,
-          locationCapturedAt: fresh.timestamp ? new Date(fresh.timestamp).toISOString() : null,
-          capturedAt,
-        }),
-      });
-      const data = await res.json();
-      if (res.status === 422 && data?.code === 'GPS_POLICY') {
-        toast.error(data?.error || 'LOCATION REQUIRED — enable location and try again');
-        return;
-      }
-      if (!res.ok) throw new Error(data?.error || 'Evidence capture failed');
-      if (data?.warn && data?.message) toast.warning(data.message);
-      if (data?.status === 'FAILED') {
-        toast.warning(`Evidence ${data.evidenceRef} saved — watermark will be regenerated`);
+      // Attempt immediate upload if online.
+      if (navigator.onLine) {
+        const { processQueueItem } = await import('@/lib/evidence/offline-queue');
+        const success = await processQueueItem(queued);
+        if (success) {
+          toast.success('Evidence photo captured and uploaded');
+          fetchData();
+        } else {
+          // Refresh to show updated status (FAILED with message).
+          toast.warning('Photo saved locally — upload will retry when connected');
+        }
       } else {
-        toast.success(`Evidence ${data.evidenceRef} captured`);
+        toast.warning('Offline — photo saved locally and will upload when connected');
       }
-      fetchData();
+      await refreshQueue();
     } catch (err: any) {
       console.error('Evidence capture error:', err);
       toast.error(err?.message || 'Evidence capture failed');
@@ -320,6 +358,32 @@ export function PortalTaskDetail({ id }: { id: string }) {
             </label>
 
             {evidenceUploading && <div className="text-center py-2"><Loader2 className="w-5 h-5 animate-spin mx-auto" /><p className="text-xs text-muted-foreground">Capturing evidence...</p></div>}
+
+            {/* Offline evidence queue status */}
+            {evidenceQueue.filter(q => q.status !== 'UPLOADED').length > 0 && (
+              <Card className="border-amber-400/50 bg-amber-50 dark:bg-amber-950/20">
+                <CardContent className="py-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <WifiOff className="w-4 h-4 text-amber-600" />
+                      <span>{evidenceQueue.filter(q => q.status === 'PENDING_UPLOAD' || q.status === 'FAILED').length} pending evidence photo(s)</span>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={handleRetryQueue} disabled={queueProcessing}>
+                      {queueProcessing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                      <span className="ml-1 text-xs">Retry</span>
+                    </Button>
+                  </div>
+                  <div className="space-y-1">
+                    {evidenceQueue.filter(q => q.status !== 'UPLOADED').map(q => (
+                      <div key={q.localUuid} className="flex items-center justify-between text-xs">
+                        <span className="truncate max-w-[60%]">{q.fileName}</span>
+                        <span className={q.status === 'FAILED' ? 'text-red-600' : q.status === 'UPLOADING' ? 'text-blue-600' : 'text-amber-600'}>{q.status.replace('_', ' ')}</span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <label className="cursor-pointer">
