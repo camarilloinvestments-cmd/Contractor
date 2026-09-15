@@ -43,12 +43,36 @@ export async function PATCH(request: Request, { params }: Params) {
 
   const intake = await prisma.aiWorkIntake.findUnique({ where: { id }, include: { items: true } });
   if (!intake) return NextResponse.json({ error: 'Intake not found' }, { status: 404 });
+  // Finalized / terminal states can never be edited.
   if (intake.status === 'IMPORTED' || intake.status === 'REJECTED') {
     return NextResponse.json({ error: 'Intake is finalized and can no longer be edited' }, { status: 400 });
+  }
+  // In-flight states: an approval is claiming/converting the intake (APPROVING),
+  // or an analysis is actively (re)writing its draft/items (ANALYZING). Editing
+  // now would let source/draft/resolutions mutate underneath that operation and
+  // could race the transactional review gate - reject the edit.
+  if (intake.status === 'APPROVING' || intake.status === 'ANALYZING') {
+    return NextResponse.json(
+      { error: `Intake is currently ${intake.status.toLowerCase()} and cannot be edited until it settles` },
+      { status: 409 },
+    );
   }
 
   const body = await request.json().catch(() => ({}));
   const ownItemIds = new Set(intake.items.map((it) => it.id));
+  const oldItemById = new Map(intake.items.map((it) => [it.id, it]));
+  // Blocker/Item 3 - per-item review-decision audit trail. Records who changed a
+  // flagged item's resolution and from what to what. Never includes source or
+  // AI document content - only the resolution transition + bounded note.
+  const reviewDecisions: Array<{
+    itemId: string;
+    deviceId: string | null;
+    oldResolution: string;
+    newResolution: string;
+    reviewedBy: string;
+    reviewNotePresent: boolean;
+    reviewNote: string | null;
+  }> = [];
 
   const intakeData: Record<string, unknown> = {};
   if (typeof body.title === 'string') intakeData.title = body.title.slice(0, 300);
@@ -84,6 +108,23 @@ export async function PATCH(request: Request, { params }: Params) {
         data.reviewedById = actor.id;
         data.reviewedAt = new Date();
       }
+      // Capture the resolution transition for the audit trail (only when it
+      // actually changes vs the persisted row).
+      const old = oldItemById.get(upd.id);
+      const oldResolution = old?.reviewResolution ?? 'PENDING';
+      if (oldResolution !== upd.reviewResolution) {
+        const notePresent =
+          typeof upd.reviewNote === 'string' && upd.reviewNote.trim().length > 0;
+        reviewDecisions.push({
+          itemId: upd.id,
+          deviceId: old?.deviceId ?? null,
+          oldResolution,
+          newResolution: upd.reviewResolution,
+          reviewedBy: actor.id,
+          reviewNotePresent: notePresent,
+          reviewNote: notePresent ? String(upd.reviewNote).slice(0, 200) : null,
+        });
+      }
     }
     if (typeof upd.reviewNote === 'string') data.reviewNote = upd.reviewNote.slice(0, 2000);
     else if (upd.reviewNote === null) data.reviewNote = null;
@@ -98,7 +139,12 @@ export async function PATCH(request: Request, { params }: Params) {
 
   await writeAudit({
     actor, action: 'ai_intake.edited', entityType: 'AiWorkIntake', entityId: id,
-    metadata: { editedItems: itemUpdates.length }, ...requestMeta(request),
+    metadata: {
+      editedItems: itemUpdates.length,
+      reviewDecisionCount: reviewDecisions.length,
+      reviewDecisions,
+    },
+    ...requestMeta(request),
   });
 
   const updated = await prisma.aiWorkIntake.findUnique({

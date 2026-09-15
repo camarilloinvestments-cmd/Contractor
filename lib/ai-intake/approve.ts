@@ -31,53 +31,37 @@ export type ApproveInput = {
   itemDecisions: ItemDecision[];
 };
 
-// Idempotent: if the intake already produced a work order, return it unchanged.
-export async function approveIntake(
-  intakeId: string,
-  input: ApproveInput,
-  actor: ActorMeta,
-  reqMeta: ReqMeta = {},
-) {
-  const intake = await prisma.aiWorkIntake.findUnique({
-    where: { id: intakeId },
-    include: { items: true },
-  });
-  if (!intake) throw new AiApproveError('Intake not found');
+// Intake statuses that represent a completed, analyzed draft eligible for
+// approval. A Work Order may ONLY be created from one of these post-analysis
+// states - never from NEW/ANALYZING/FAILED (no completed draft) nor from a
+// terminal/in-flight state (REJECTED/APPROVING/IMPORTED).
+export const APPROVABLE_STATUSES = ['READY', 'NEEDS_REVIEW'] as const;
 
-  // Idempotency guard - never create a second WO for the same intake.
-  if (intake.resultingJobId) {
-    const existing = await prisma.job.findUnique({ where: { id: intake.resultingJobId } });
-    if (existing) return { job: existing, alreadyImported: true };
-  }
+// Minimal shape the authoritative review gate needs from an item row.
+type ReviewableItem = {
+  id: string;
+  deviceId: string | null;
+  requiresReview: boolean;
+  possibleDuplicate: boolean;
+  reviewResolution: string;
+};
 
-  if (intake.status === 'REJECTED') throw new AiApproveError('Intake has been rejected');
-  if (!intake.projectId) {
-    throw new AiApproveError('Intake has no project selected; a project is required to create a work order');
-  }
-  if (!input.jobName || !input.jobName.trim()) {
-    throw new AiApproveError('jobName is required');
-  }
-
-  const decisionsByItem = new Map<string, ItemDecision>();
-  for (const d of input.itemDecisions || []) {
-    if (!d.itemId) continue;
-    decisionsByItem.set(d.itemId, d);
-  }
-
-  // Only items the operator chose to include (has a decision) become tasks.
-  // Rejected/skipped items are simply omitted.
-  const included = intake.items.filter((it) => decisionsByItem.has(it.id));
+// Authoritative, server-enforced review gate (Blocker 3). Given the CURRENT item
+// rows and the operator decisions, return the items that may become tasks. A
+// flagged item (requiresReview OR possibleDuplicate) must carry an explicit,
+// PERSISTED resolution: EXCLUDED is omitted, only CONFIRMED/CORRECTED proceed,
+// and a still-PENDING included flagged item REJECTS the whole approval. This
+// must be evaluated on rows read INSIDE the approval transaction so it cannot
+// race a concurrent operator PATCH.
+function selectOperationalItems<T extends ReviewableItem>(
+  items: T[],
+  decisionsByItem: Map<string, ItemDecision>,
+): T[] {
+  const included = items.filter((it) => decisionsByItem.has(it.id));
   if (included.length === 0) {
     throw new AiApproveError('Select at least one item to create as a task');
   }
-
-  // Blocker 3 - server-enforced review gate. A flagged item (requiresReview OR
-  // possibleDuplicate) must carry an explicit, PERSISTED operator resolution
-  // before it can be operationalized. EXCLUDED items are omitted (never tasked);
-  // only CONFIRMED/CORRECTED may proceed; a still-PENDING flagged item that the
-  // operator tried to include REJECTS the whole approval. This cannot be
-  // bypassed from the client - the decision comes from the persisted column.
-  const operational: typeof included = [];
+  const operational: T[] = [];
   for (const it of included) {
     const d = decisionsByItem.get(it.id)!;
     if (!d.taskTypeId) {
@@ -99,11 +83,61 @@ export async function approveIntake(
   if (operational.length === 0) {
     throw new AiApproveError('No items remain to create as tasks after review exclusions');
   }
+  return operational;
+}
+
+// Idempotent: if the intake already produced a work order, return it unchanged.
+export async function approveIntake(
+  intakeId: string,
+  input: ApproveInput,
+  actor: ActorMeta,
+  reqMeta: ReqMeta = {},
+) {
+  const intake = await prisma.aiWorkIntake.findUnique({
+    where: { id: intakeId },
+    include: { items: true },
+  });
+  if (!intake) throw new AiApproveError('Intake not found');
+
+  // Idempotency guard - never create a second WO for the same intake.
+  if (intake.resultingJobId) {
+    const existing = await prisma.job.findUnique({ where: { id: intake.resultingJobId } });
+    if (existing) return { job: existing, alreadyImported: true };
+  }
+
+  if (intake.status === 'REJECTED') throw new AiApproveError('Intake has been rejected');
+  // Only a completed, analyzed draft (READY / NEEDS_REVIEW) may be approved.
+  // NEW/ANALYZING/FAILED have no completed draft; APPROVING/IMPORTED are handled
+  // by the idempotency guard / the transactional claim below. This is an early
+  // fail-fast; the AUTHORITATIVE gate is the conditional claim inside the tx.
+  if (!(APPROVABLE_STATUSES as readonly string[]).includes(intake.status)) {
+    throw new AiApproveError(
+      `Intake is not in an approvable state (status ${intake.status}); only an analyzed draft (READY or NEEDS_REVIEW) can be approved`,
+    );
+  }
+  if (!intake.projectId) {
+    throw new AiApproveError('Intake has no project selected; a project is required to create a work order');
+  }
+  if (!input.jobName || !input.jobName.trim()) {
+    throw new AiApproveError('jobName is required');
+  }
+
+  const decisionsByItem = new Map<string, ItemDecision>();
+  for (const d of input.itemDecisions || []) {
+    if (!d.itemId) continue;
+    decisionsByItem.set(d.itemId, d);
+  }
+
+  // Early fail-fast on the pre-transaction snapshot (cheap client feedback). The
+  // AUTHORITATIVE evaluation happens on rows re-read INSIDE the transaction so a
+  // concurrent PATCH cannot flip a resolution underneath us.
+  selectOperationalItems(intake.items, decisionsByItem);
+  const projectId = intake.projectId;
 
   // Resolve + pin the exact (prime, project, book, version) - operator override
   // honored. Read-only; safe to resolve before opening the write transaction.
   const pin = await resolveWorkOrderPin({
-    projectId: intake.projectId,
+    projectId,
     overrideVersionId: input.overrideVersionId ?? null,
   });
 
@@ -127,7 +161,10 @@ export async function approveIntake(
             where: {
               id: intakeId,
               resultingJobId: null,
-              status: { notIn: ['IMPORTED', 'APPROVING', 'REJECTED'] },
+              // Authoritative claim: only a completed, analyzed draft may be
+              // moved into APPROVING. Anything else (NEW/ANALYZING/FAILED/
+              // APPROVING/IMPORTED/REJECTED) matches zero rows.
+              status: { in: ['READY', 'NEEDS_REVIEW'] },
             },
             data: { status: 'APPROVING' },
           });
@@ -142,6 +179,15 @@ export async function approveIntake(
             }
             throw new AiApproveError('Intake is already being approved or imported');
           }
+
+          // (1b) AUTHORITATIVE review gate: re-read the item rows INSIDE the
+          // transaction and re-evaluate the gate on them, so a concurrent PATCH
+          // that flipped a resolution (e.g. CONFIRMED -> PENDING) after our
+          // pre-tx snapshot cannot authorize a stale task. The claim above set
+          // this intake to APPROVING, which the PATCH route refuses to edit, so
+          // these rows are now stable for the remainder of the transaction.
+          const freshItems = await tx.aiIntakeItem.findMany({ where: { intakeId } });
+          const operational = selectOperationalItems(freshItems, decisionsByItem);
 
           // (2) Allocate the WO number on the SAME tx client.
           const jobNumber = await allocateNumber('WORKORDER', tx);

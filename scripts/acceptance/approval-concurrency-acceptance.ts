@@ -64,9 +64,9 @@ function main() {
     const body = src.slice(txIdx);
     const claimIdx = body.indexOf('tx.aiWorkIntake.updateMany');
     assert.ok(claimIdx !== -1, 'claim uses tx.aiWorkIntake.updateMany');
-    const claim = body.slice(claimIdx, claimIdx + 400);
+    const claim = body.slice(claimIdx, claimIdx + 700);
     assert.ok(/resultingJobId: null/.test(claim), 'claim requires resultingJobId null');
-    assert.ok(/status: \{ notIn: \['IMPORTED', 'APPROVING', 'REJECTED'\] \}/.test(claim), 'claim excludes already-claimed/finalized states');
+    assert.ok(/status: \{ in: \['READY', 'NEEDS_REVIEW'\] \}/.test(claim), 'claim admits ONLY an analyzed draft (READY/NEEDS_REVIEW)');
     assert.ok(/data: \{ status: 'APPROVING' \}/.test(claim), 'claim moves status to APPROVING');
     // A losing caller (count !== 1) must NOT create a second job.
     assert.ok(/claim\.count !== 1/.test(body), 'branches when the claim matches zero rows');
@@ -78,6 +78,20 @@ function main() {
     // When the claim fails and the intake already has a job, return that job.
     assert.ok(/if \(cur\?\.resultingJobId\)/.test(body), 'checks the live resultingJobId on a failed claim');
     assert.ok(/kind: 'existing'/.test(body), 'returns the existing job branch');
+  });
+
+  check('authoritative review gate re-reads item rows INSIDE the tx (no stale snapshot)', () => {
+    const txIdx = src.indexOf('prisma.$transaction(');
+    const body = src.slice(txIdx);
+    // Items feeding the gate must be fetched via the tx client, not the pre-tx
+    // intake.items snapshot, so a concurrent PATCH cannot authorize a stale task.
+    assert.ok(/tx\.aiIntakeItem\.findMany\(\{ where: \{ intakeId \} \}\)/.test(body), 'item rows re-read via tx.aiIntakeItem.findMany inside the tx');
+    const gateIdx = body.indexOf('selectOperationalItems(freshItems');
+    assert.ok(gateIdx !== -1, 'gate evaluated on the tx-fetched freshItems');
+    const claimIdx = body.indexOf('tx.aiWorkIntake.updateMany');
+    assert.ok(claimIdx !== -1 && claimIdx < gateIdx, 'gate runs AFTER the APPROVING claim, on stable rows');
+    // The task-creation loop must consume the tx-derived operational list.
+    assert.ok(/for \(const it of operational\)/.test(body), 'tasks are created from the tx-derived operational list');
   });
 
   check('the WO number is allocated on the SAME tx client', () => {

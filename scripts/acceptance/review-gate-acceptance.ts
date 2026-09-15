@@ -82,6 +82,42 @@ function main() {
     assert.ok(/data\.reviewedById = null/.test(blk) && /data\.reviewedAt = null/.test(blk), 'PENDING clears the resolver audit');
   });
 
+  check('the authoritative gate runs on rows RE-READ inside the approval tx', () => {
+    const src = read('lib/ai-intake/approve.ts');
+    const txIdx = src.indexOf('prisma.$transaction(');
+    const body = src.slice(txIdx);
+    assert.ok(/tx\.aiIntakeItem\.findMany\(\{ where: \{ intakeId \} \}\)/.test(body), 'items re-read via the tx client');
+    assert.ok(/selectOperationalItems\(freshItems/.test(body), 'gate evaluated on the tx-fetched rows, not the pre-tx snapshot');
+  });
+
+  check('PATCH rejects edits while the intake is APPROVING or ANALYZING (anti-race)', () => {
+    const route = read('app/api/ai-intake/[id]/route.ts');
+    assert.ok(/intake\.status === 'APPROVING' \|\| intake\.status === 'ANALYZING'/.test(route), 'in-flight states block edits');
+    const idx = route.indexOf("intake.status === 'APPROVING'");
+    assert.ok(/status: 409/.test(route.slice(idx, idx + 300)), 'returns 409 while in-flight');
+    // Finalized states remain blocked too.
+    assert.ok(/intake\.status === 'IMPORTED' \|\| intake\.status === 'REJECTED'/.test(route), 'finalized states still blocked');
+  });
+
+  check('review-decision audit trail records old->new resolution + resolver (no source content)', () => {
+    const route = read('app/api/ai-intake/[id]/route.ts');
+    assert.ok(/reviewDecisions\b/.test(route), 'builds a reviewDecisions audit array');
+    const decIdx = route.indexOf('reviewDecisions.push(');
+    assert.ok(decIdx !== -1, 'pushes a per-item decision record');
+    const rec = route.slice(decIdx, decIdx + 400);
+    for (const f of ['itemId', 'deviceId', 'oldResolution', 'newResolution', 'reviewedBy']) {
+      assert.ok(new RegExp('\\b' + f + '\\b').test(rec), `audit record includes ${f}`);
+    }
+    // Only recorded when the resolution actually changes.
+    assert.ok(/oldResolution !== upd\.reviewResolution/.test(route), 'only logs an actual transition');
+    // Note is bounded and presence-flagged; source/AI document content never logged.
+    assert.ok(/reviewNotePresent/.test(rec), 'flags note presence rather than dumping content');
+    assert.ok(/slice\(0, 200\)/.test(rec), 'bounds any logged note to 200 chars');
+    // The audit metadata carries the array.
+    const auditIdx = route.indexOf("action: 'ai_intake.edited'");
+    assert.ok(/reviewDecisions,/.test(route.slice(auditIdx, auditIdx + 300)), 'edited audit metadata carries reviewDecisions');
+  });
+
   console.log(`\nREVIEW GATE ACCEPTANCE: ${pass} passed, ${fail} failed`);
   if (fail > 0) process.exit(1);
 }
