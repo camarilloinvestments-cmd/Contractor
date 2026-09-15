@@ -245,8 +245,10 @@ async function main() {
   await check('analyze preserves sources + prior draft on failure', () => {
     const a = read('lib/ai-intake/analyze.ts');
     assert.ok(/status: 'FAILED'/.test(a), 'failed runs are marked FAILED');
-    // In the catch block there must be no destructive delete of sources.
-    const catchIdx = a.indexOf('} catch (e) {');
+    // In the FAILURE-handling catch (the one that marks FAILED) there must be no
+    // destructive delete of sources. Anchor on the LAST catch: an earlier,
+    // benign catch now guards the analysis claim and performs no deletes.
+    const catchIdx = a.lastIndexOf('} catch (e) {');
     const tail = a.slice(catchIdx);
     const bulkDelete = 'delete' + 'Many';
     assert.ok(!tail.includes('aiIntakeSource.' + bulkDelete), 'failure must not delete sources');
@@ -256,10 +258,15 @@ async function main() {
   await check('draft item deletion happens only inside the success transaction', () => {
     const a = read('lib/ai-intake/analyze.ts');
     assert.ok(/\$transaction/.test(a));
-    const txIdx = a.indexOf('$transaction');
-    const catchIdx = a.indexOf('} catch (e) {');
+    // The bulk draft clear must live in the SUCCESS transaction: after the main
+    // (persist) $transaction opens and before the FAILURE-handling catch. Anchor
+    // on the LAST $transaction (persist) and the LAST catch (FAILED handler) so
+    // the new claim tx/guard added ahead of them does not move the window.
+    const txIdx = a.lastIndexOf('$transaction');
+    const catchIdx = a.lastIndexOf('} catch (e) {');
     const delIdx = a.indexOf('aiIntakeItem.' + ('delete' + 'Many'));
-    assert.ok(delIdx > txIdx && delIdx < catchIdx, 'the bulk draft clear is only in the success path');
+    assert.ok(delIdx > txIdx, 'the bulk draft clear is inside the success (persist) transaction');
+    assert.ok(delIdx < catchIdx, 'the bulk draft clear is NOT in the failure path');
   });
 
   // ---------------------------------------------------------------------------

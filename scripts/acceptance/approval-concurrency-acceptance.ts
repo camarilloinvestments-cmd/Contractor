@@ -119,6 +119,44 @@ function main() {
     assert.ok(!/writeAudit\(/.test(txBody), 'no audit writes inside the transaction body');
   });
 
+  check('source add/remove go through the SAME draft-edit state lock (fail closed)', () => {
+    const sources = read('lib/ai-intake/sources.ts');
+    // Registration and removal both claim the parent row FIRST inside their tx.
+    assert.ok(/registerIntakeSource[\s\S]{0,220}\$transaction\(async \(tx\) => \{\s*await claimForDraftEdit\(tx, intakeId\)/.test(sources), 'registerIntakeSource claims the lock first');
+    assert.ok(/removeIntakeSource[\s\S]{0,220}\$transaction\(async \(tx\) => \{\s*await claimForDraftEdit\(tx, intakeId\)/.test(sources), 'removeIntakeSource claims the lock first');
+    // Removal re-verifies ownership INSIDE the locked tx.
+    assert.ok(/source\.intakeId !== intakeId[\s\S]{0,80}IntakeSourceNotFoundError/.test(sources), 'removal re-checks ownership under the lock');
+  });
+
+  check('upload route validates state, then cleans up the object if it loses the race', () => {
+    const route = read('app/api/ai-intake/[id]/sources/route.ts');
+    // Fast pre-check on the mutable set (avoids needless uploads) ...
+    assert.ok(/DRAFT_MUTABLE = new Set<string>\(\[\.\.\.MUTABLE_DRAFT_STATUSES\]\)/.test(route), 'pre-check uses the authoritative mutable set');
+    assert.ok(/!DRAFT_MUTABLE\.has\(pre\.status\)[\s\S]{0,140}status: 409/.test(route), 'clearly-immutable intake is refused before upload (409)');
+    // ... but the AUTHORITATIVE guard is registerIntakeSource; a lost race after
+    // upload deletes the orphaned object and returns 409.
+    assert.ok(/registerIntakeSource\(/.test(route), 'authoritative registration goes through the locked lib fn');
+    assert.ok(/IntakeStateLockError[\s\S]{0,160}deleteFile\(cloud_storage_path\)[\s\S]{0,120}status: 409/.test(route), 'lost race cleans up the upload and returns 409');
+  });
+
+  check('analyze CLAIMS the intake before reading any input (claim-before-read)', () => {
+    const analyze = read('lib/ai-intake/analyze.ts');
+    const claimIdx = analyze.indexOf('claimForAnalysis(tx, intakeId)');
+    assert.ok(claimIdx !== -1, 'analyze claims via claimForAnalysis');
+    // The claim must precede the first read of the intake/sources.
+    const readIdx = analyze.indexOf('prisma.aiWorkIntake.findUnique');
+    assert.ok(readIdx !== -1 && claimIdx < readIdx, 'claim runs BEFORE reading the intake + sources');
+    // The analysis claim conditions on the analyzable set and moves to ANALYZING.
+    const lock = read('lib/ai-intake/state-lock.ts');
+    assert.ok(/ANALYZABLE_STATUSES = \['NEW', 'FAILED', 'READY', 'NEEDS_REVIEW'\]/.test(lock), 'analyzable allow-list');
+    assert.ok(/updateMany\([\s\S]{0,220}status: \{ in: \[\.\.\.ANALYZABLE_STATUSES\] \}[\s\S]{0,120}status: 'ANALYZING'/.test(lock), 'claim atomically flips to ANALYZING');
+    // A second concurrent claim (already ANALYZING) is refused with a clear msg.
+    assert.ok(/status === 'ANALYZING'[\s\S]{0,160}Analysis is already running/.test(lock), 'second concurrent analysis is refused');
+    // A lost analysis claim must NOT set the intake to FAILED (claim is outside
+    // the main try that maps errors to FAILED).
+    assert.ok(/if \(e instanceof IntakeStateLockError\) throw new AiIntakeError\(e\.message\)/.test(analyze), 'lost claim surfaces a clean error, not FAILED');
+  });
+
   console.log(`\nAPPROVAL CONCURRENCY ACCEPTANCE: ${pass} passed, ${fail} failed`);
   if (fail > 0) process.exit(1);
 }

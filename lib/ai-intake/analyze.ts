@@ -16,6 +16,7 @@ import { runExtraction, type OpenAiMessage, type OpenAiContentPart } from './ope
 import { AiIntakeResponseSchema, AI_INTAKE_SCHEMA_VERSION } from './schema';
 import { applyBusinessRules } from './business';
 import { findDuplicates } from './duplicate';
+import { claimForAnalysis, IntakeStateLockError } from './state-lock';
 
 export type ActorMeta = { id: string; email: string; role: string };
 export type ReqMeta = { ipAddress?: string | null; userAgent?: string | null };
@@ -23,37 +24,52 @@ export type ReqMeta = { ipAddress?: string | null; userAgent?: string | null };
 export class AiIntakeError extends Error {}
 
 export async function analyzeIntake(intakeId: string, actor: ActorMeta, reqMeta: ReqMeta = {}) {
-  const intake = await prisma.aiWorkIntake.findUnique({
-    where: { id: intakeId },
-    include: { sources: true },
-  });
-  if (!intake) throw new AiIntakeError('Intake not found');
-
   const settingsRow = await getAiIntakeSettingsRaw();
   if (!settingsRow || !settingsRow.enabled) throw new AiIntakeError('AI intake is not enabled');
   const apiKey = getDecryptedApiKey(settingsRow);
   if (!apiKey) throw new AiIntakeError('No OpenAI API key configured');
 
-  // Prime/Project metadata (approved, trusted context).
-  const prime = await prisma.primeContractor.findUnique({
-    where: { id: intake.primeContractorId },
-    select: { companyName: true },
-  });
-  const project = intake.projectId
-    ? await prisma.project.findUnique({
-        where: { id: intake.projectId },
-        select: { projectCode: true, projectName: true },
-      })
-    : null;
-  const rules = await getScopedRules(intake.primeContractorId, intake.projectId);
+  // Concurrency control: atomically CLAIM the intake for analysis BEFORE reading
+  // its sources / pasted text. This guarantees (a) two concurrent analyses can
+  // never both run against the same intake (the loser matches zero rows and is
+  // refused), and (b) the input set we analyze is frozen - draft/source edits
+  // fail closed while the intake is ANALYZING. Only one caller moves an
+  // analyzable intake -> ANALYZING.
+  try {
+    await prisma.$transaction(async (tx) => {
+      await claimForAnalysis(tx, intakeId);
+    });
+  } catch (e) {
+    if (e instanceof IntakeStateLockError) throw new AiIntakeError(e.message);
+    throw e;
+  }
 
-  await prisma.aiWorkIntake.update({ where: { id: intakeId }, data: { status: 'ANALYZING', error: null } });
   await writeAudit({
     actor, action: 'ai_intake.analysis_started', entityType: 'AiWorkIntake', entityId: intakeId,
     metadata: { model: settingsRow.normalModel }, ...reqMeta,
   });
 
   try {
+    // We now own the intake (status ANALYZING). Read the input set we own.
+    const intake = await prisma.aiWorkIntake.findUnique({
+      where: { id: intakeId },
+      include: { sources: true },
+    });
+    if (!intake) throw new AiIntakeError('Intake not found');
+
+    // Prime/Project metadata (approved, trusted context).
+    const prime = await prisma.primeContractor.findUnique({
+      where: { id: intake.primeContractorId },
+      select: { companyName: true },
+    });
+    const project = intake.projectId
+      ? await prisma.project.findUnique({
+          where: { id: intake.projectId },
+          select: { projectCode: true, projectName: true },
+        })
+      : null;
+    const rules = await getScopedRules(intake.primeContractorId, intake.projectId);
+
     // Build the user content: pasted text first, then each file source.
     const userParts: OpenAiContentPart[] = [];
     const sourceSentInfo: { id: string; sentToAi: boolean; info: Record<string, unknown> }[] = [];

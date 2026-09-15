@@ -69,14 +69,18 @@ function main() {
     assert.ok(/operational\.length === 0/.test(src), 'aborts when nothing remains after exclusions');
   });
 
-  check('PATCH validates the resolution enum (400 on junk) and records the resolver', () => {
+  check('draft-edit validates the resolution enum (400 on junk) and records the resolver', () => {
+    // The enum allow-list + resolver-audit logic lives in the shared draft-edit
+    // mutation path; the route maps DraftEditValidationError -> HTTP 400.
+    const lib = read('lib/ai-intake/draft-edit.ts');
     const route = read('app/api/ai-intake/[id]/route.ts');
-    assert.ok(/REVIEW_RESOLUTIONS = \['PENDING', 'CONFIRMED', 'CORRECTED', 'EXCLUDED'\]/.test(route), 'server allow-list of enum values');
-    assert.ok(/isReviewResolution\(upd\.reviewResolution\)/.test(route), 'validates the incoming value');
-    assert.ok(/status: 400/.test(route), 'rejects invalid values with 400');
+    assert.ok(/REVIEW_RESOLUTIONS = \['PENDING', 'CONFIRMED', 'CORRECTED', 'EXCLUDED'\]/.test(lib), 'server allow-list of enum values');
+    assert.ok(/isReviewResolution\(upd\.reviewResolution\)/.test(lib), 'validates the incoming value');
+    assert.ok(/throw new DraftEditValidationError\(/.test(lib), 'invalid enum throws a validation error');
+    assert.ok(/DraftEditValidationError\)[\s\S]{0,120}status: 400/.test(route), 'route maps the validation error to 400');
     // A non-PENDING (explicit) decision records who resolved it and when.
-    const setIdx = route.indexOf('data.reviewResolution = upd.reviewResolution');
-    const blk = route.slice(setIdx, setIdx + 400);
+    const setIdx = lib.indexOf('data.reviewResolution = upd.reviewResolution');
+    const blk = lib.slice(setIdx, setIdx + 400);
     assert.ok(/data\.reviewedById = actor\.id/.test(blk), 'records the resolver id');
     assert.ok(/data\.reviewedAt = new Date\(\)/.test(blk), 'records the resolution time');
     assert.ok(/data\.reviewedById = null/.test(blk) && /data\.reviewedAt = null/.test(blk), 'PENDING clears the resolver audit');
@@ -90,17 +94,27 @@ function main() {
     assert.ok(/selectOperationalItems\(freshItems/.test(body), 'gate evaluated on the tx-fetched rows, not the pre-tx snapshot');
   });
 
-  check('PATCH rejects edits while the intake is APPROVING or ANALYZING (anti-race)', () => {
+  check('draft edits are refused (409) while not draft-mutable, via the tx state-lock', () => {
+    const lock = read('lib/ai-intake/state-lock.ts');
+    const lib = read('lib/ai-intake/draft-edit.ts');
     const route = read('app/api/ai-intake/[id]/route.ts');
-    assert.ok(/intake\.status === 'APPROVING' \|\| intake\.status === 'ANALYZING'/.test(route), 'in-flight states block edits');
-    const idx = route.indexOf("intake.status === 'APPROVING'");
-    assert.ok(/status: 409/.test(route.slice(idx, idx + 300)), 'returns 409 while in-flight');
-    // Finalized states remain blocked too.
-    assert.ok(/intake\.status === 'IMPORTED' \|\| intake\.status === 'REJECTED'/.test(route), 'finalized states still blocked');
+    // The authoritative draft-mutable set EXCLUDES the in-flight/terminal states.
+    assert.ok(/MUTABLE_DRAFT_STATUSES = \['NEW', 'READY', 'NEEDS_REVIEW', 'FAILED'\]/.test(lock), 'draft-mutable allow-list');
+    for (const s of ['ANALYZING', 'APPROVING', 'IMPORTED', 'REJECTED']) {
+      assert.ok(!new RegExp("MUTABLE_DRAFT_STATUSES = \\[[^\\]]*'" + s + "'").test(lock), `${s} is NOT draft-mutable`);
+    }
+    // The claim is a conditional updateMany that bumps revision; zero rows -> throw.
+    assert.ok(/export async function claimForDraftEdit/.test(lock), 'exposes claimForDraftEdit');
+    assert.ok(/updateMany\([\s\S]{0,200}status: \{ in: \[\.\.\.MUTABLE_DRAFT_STATUSES\] \}/.test(lock), 'claim conditions on the mutable set');
+    assert.ok(/res\.count !== 1[\s\S]{0,200}IntakeStateLockError/.test(lock), 'a losing claim throws IntakeStateLockError');
+    // The shared mutation path calls the claim as the FIRST statement in the tx.
+    assert.ok(/\$transaction\(async \(tx\) => \{\s*await claimForDraftEdit\(tx, intakeId\)/.test(lib), 'claim is the first write inside the edit tx');
+    // The route maps the lock error to HTTP 409.
+    assert.ok(/IntakeStateLockError\)[\s\S]{0,160}status: 409/.test(route), 'route maps the state-lock error to 409');
   });
 
   check('review-decision audit trail records old->new resolution + resolver (no source content)', () => {
-    const route = read('app/api/ai-intake/[id]/route.ts');
+    const route = read('lib/ai-intake/draft-edit.ts');
     assert.ok(/reviewDecisions\b/.test(route), 'builds a reviewDecisions audit array');
     const decIdx = route.indexOf('reviewDecisions.push(');
     assert.ok(decIdx !== -1, 'pushes a per-item decision record');

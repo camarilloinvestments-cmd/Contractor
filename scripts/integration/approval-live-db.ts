@@ -21,6 +21,14 @@
 //        node_modules/.bin/tsx scripts/integration/approval-live-db.ts
 import { prisma } from '@/lib/prisma';
 import { approveIntake, AiApproveError } from '@/lib/ai-intake/approve';
+import { applyDraftEdit } from '@/lib/ai-intake/draft-edit';
+import { registerIntakeSource, removeIntakeSource } from '@/lib/ai-intake/sources';
+import { claimForAnalysis, IntakeStateLockError } from '@/lib/ai-intake/state-lock';
+
+// True iff the async fn rejects specifically with the state-lock (409) error.
+async function throwsStateLock(fn: () => Promise<unknown>): Promise<boolean> {
+  try { await fn(); return false; } catch (e) { return e instanceof IntakeStateLockError; }
+}
 
 const DB = process.env.DATABASE_URL || '';
 if (!/:55432\//.test(DB)) {
@@ -190,10 +198,13 @@ async function caseC(fx: Fixtures) {
     { deviceId: 'RV1001', requiresReview: true, reviewResolution: 'CONFIRMED' },
   ]);
   const input = { jobName: 'Race WO', itemDecisions: decisionsFor(raceIntake.items, fx.taskTypeId) };
-  const flip = prisma.aiIntakeItem.update({
-    where: { id: raceIntake.items[0].id },
-    data: { reviewResolution: 'PENDING' as any },
-  });
+  // The flip now goes through the REAL, state-locked draft-edit path (not a raw
+  // item update), so it can only mutate while it legitimately owns the intake.
+  const flip = applyDraftEdit(
+    raceIntake.id,
+    { items: [{ id: raceIntake.items[0].id, reviewResolution: 'PENDING' }] },
+    actor,
+  ).catch((e) => { if (e instanceof IntakeStateLockError) return null; throw e; });
   const [appr] = await Promise.allSettled([approveIntake(raceIntake.id, input, actor), flip]);
   const jobs = await jobCountFor(raceIntake.intakeNumber);
   const after = await prisma.aiWorkIntake.findUnique({ where: { id: raceIntake.id } });
@@ -238,6 +249,87 @@ async function caseE(fx: Fixtures) {
   ok('retry is flagged alreadyImported', second.alreadyImported === true, `alreadyImported=${second.alreadyImported}`);
 }
 
+async function caseF(fx: Fixtures) {
+  console.log('\nF REAL PATCH vs APPROVE RACE (state-locked mutation path)');
+  // A flagged item CONFIRMED at start. One task races the REAL draft-edit path
+  // flipping it to PENDING against the REAL approval. The invalid outcome -
+  // PATCH reports success flipping to PENDING AND approval still tasks the stale
+  // CONFIRMED item - must be impossible. Exactly one side may win the row.
+  const N = 6;
+  for (let i = 0; i < N; i++) {
+    const intake = await makeIntake(fx, 'NEEDS_REVIEW', [
+      { deviceId: `PA${i}001`, requiresReview: true, reviewResolution: 'CONFIRMED' },
+    ]);
+    const input = { jobName: 'PatchRace WO', itemDecisions: decisionsFor(intake.items, fx.taskTypeId) };
+    const [apprRes, patchRes] = await Promise.allSettled([
+      approveIntake(intake.id, input, actor),
+      applyDraftEdit(intake.id, { items: [{ id: intake.items[0].id, reviewResolution: 'PENDING' }] }, actor),
+    ]);
+    const jobs = await jobCountFor(intake.intakeNumber);
+    const item = await prisma.aiIntakeItem.findUnique({ where: { id: intake.items[0].id } });
+    const patchOk = patchRes.status === 'fulfilled';
+    const patchLocked = patchRes.status === 'rejected' && (patchRes.reason instanceof IntakeStateLockError);
+    const apprMadeWo = apprRes.status === 'fulfilled' && !!(apprRes.value as any)?.job;
+    // The forbidden combination.
+    ok(`F#${i}: impossible combo never occurs (PATCH->PENDING AND stale-CONFIRMED WO)`,
+      !(patchOk && item?.reviewResolution === 'PENDING' && jobs === 1),
+      `patchOk=${patchOk} item=${item?.reviewResolution} jobs=${jobs}`);
+    ok(`F#${i}: never more than one WO`, jobs <= 1, `jobs=${jobs}`);
+    if (patchOk) {
+      // PATCH won the row first -> item is PENDING; the approval then re-read the
+      // flipped row inside its tx and refused, so ZERO WO exists.
+      ok(`F#${i}: PATCH won -> item PENDING and approval created 0 WO`,
+        item?.reviewResolution === 'PENDING' && jobs === 0 && !apprMadeWo,
+        `item=${item?.reviewResolution} jobs=${jobs} apprMadeWo=${apprMadeWo}`);
+    } else {
+      // PATCH lost -> it was locked out and did NOT mutate; approval owns the
+      // intake and committed exactly one WO from the CONFIRMED item.
+      ok(`F#${i}: PATCH lost -> locked out (no mutation), approval made 1 WO`,
+        patchLocked && item?.reviewResolution === 'CONFIRMED' && jobs === 1 && apprMadeWo,
+        `locked=${patchLocked} item=${item?.reviewResolution} jobs=${jobs} apprMadeWo=${apprMadeWo}`);
+    }
+  }
+}
+
+async function caseG(fx: Fixtures) {
+  console.log('\nG SOURCE / DRAFT EDIT vs ANALYZE (fail closed while ANALYZING)');
+  const intake = await makeIntake(fx, 'READY', [{ deviceId: 'SA0001', reviewResolution: 'CONFIRMED' }]);
+  // Claim the intake for analysis WITHOUT any OpenAI call: this just flips the
+  // intake to ANALYZING via the real claim.
+  await prisma.$transaction(async (tx) => { await claimForAnalysis(tx, intake.id); });
+  const mid = await prisma.aiWorkIntake.findUnique({ where: { id: intake.id } });
+  ok('analyze claim moved the intake to ANALYZING', mid?.status === 'ANALYZING', `status=${mid?.status}`);
+  // While ANALYZING, every draft mutation must fail closed with the state lock.
+  ok('source registration is refused while ANALYZING', await throwsStateLock(() =>
+    registerIntakeSource(intake.id, {
+      kind: 'image', originalFilename: 'x.png', contentType: 'image/png',
+      storagePath: 'ai-intake/sources/itest-x.png', sizeBytes: 3, sha256: 'deadbeef',
+    })));
+  ok('source removal is refused while ANALYZING', await throwsStateLock(() =>
+    removeIntakeSource(intake.id, 'any-source-id')));
+  ok('item/pastedText draft edit is refused while ANALYZING', await throwsStateLock(() =>
+    applyDraftEdit(intake.id, { title: 'blocked', items: [{ id: intake.items[0].id, reviewResolution: 'EXCLUDED' }] }, actor)));
+  const after = await prisma.aiIntakeItem.findUnique({ where: { id: intake.items[0].id } });
+  ok('no draft mutation leaked through (item unchanged, still CONFIRMED)', after?.reviewResolution === 'CONFIRMED',
+    `item=${after?.reviewResolution}`);
+}
+
+async function caseH(fx: Fixtures) {
+  console.log('\nH ANALYZE vs ANALYZE (exactly one claim wins)');
+  const N = 6;
+  for (let i = 0; i < N; i++) {
+    const intake = await makeIntake(fx, 'READY', [{ deviceId: `AA${i}001` }]);
+    const claim = () => prisma.$transaction(async (tx) => { await claimForAnalysis(tx, intake.id); });
+    const [r1, r2] = await Promise.allSettled([claim(), claim()]);
+    const won = [r1, r2].filter((r) => r.status === 'fulfilled').length;
+    const refused = [r1, r2].filter((r) => r.status === 'rejected' && (r as any).reason instanceof IntakeStateLockError).length;
+    ok(`H#${i}: exactly ONE analysis claim wins`, won === 1, `won=${won}`);
+    ok(`H#${i}: the loser is refused with the state lock`, refused === 1, `refused=${refused}`);
+    const after = await prisma.aiWorkIntake.findUnique({ where: { id: intake.id } });
+    ok(`H#${i}: intake ends in ANALYZING`, after?.status === 'ANALYZING', `status=${after?.status}`);
+  }
+}
+
 async function main() {
   console.log('APPROVAL LIVE-DB INTEGRATION TEST');
   const fx = await seedFixtures();
@@ -246,6 +338,9 @@ async function main() {
   await caseC(fx);
   await caseD(fx);
   await caseE(fx);
+  await caseF(fx);
+  await caseG(fx);
+  await caseH(fx);
   console.log(`\nAPPROVAL LIVE-DB INTEGRATION: ${pass} passed, ${fail} failed`);
   await prisma.$disconnect();
   if (fail > 0) process.exit(1);

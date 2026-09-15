@@ -2194,6 +2194,10 @@ model AiWorkIntake {
   rejectedAt        DateTime?
   rejectionReason   String?
   resultingJobId    String?
+  // Monotonic mutation counter. Bumped by every state-locked draft/source edit
+  // and analysis/approval claim so those operations take the SAME parent-row
+  // lock and serialize against each other (CAS-style optimistic guard).
+  revision          Int            @default(0)
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
