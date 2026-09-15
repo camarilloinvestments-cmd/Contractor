@@ -5,7 +5,7 @@ import { signOut } from 'next-auth/react';
 import {
   LayoutDashboard, Building2, Briefcase, Wrench, Users, FileText,
   DollarSign, BarChart3, Settings, LogOut, Cable, ChevronLeft, ChevronRight, HardHat, Coins, TrendingUp,
-  Map, Route, DownloadCloud, ClipboardCheck, TabletSmartphone, FileEdit, FileCheck2, Receipt, ChevronDown,
+  Map, Route, DownloadCloud, ClipboardCheck, TabletSmartphone, FileEdit, FileCheck2, Receipt, ChevronDown, Camera,
   type LucideIcon,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
@@ -74,6 +74,7 @@ const navGroups: NavGroup[] = [
       { href: '/operations/live-map', label: 'Live Map', icon: Map, roles: ['ADMIN', 'PROJECT_MANAGER'] },
       { href: '/operations/fleet/vehicle-history', label: 'Vehicle History', icon: Route, roles: ['ADMIN', 'PROJECT_MANAGER'] },
       { href: '/evidence', label: 'Evidence Review', icon: ClipboardCheck, roles: ['ADMIN', 'PROJECT_MANAGER'] },
+      { href: '/evidence/photos', label: 'Field Photos', icon: Camera, roles: ['ADMIN', 'PROJECT_MANAGER'] },
       { href: '/system/devices', label: 'Device Management', icon: TabletSmartphone, roles: ['ADMIN'] },
     ],
   },

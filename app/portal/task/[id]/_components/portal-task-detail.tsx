@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge } from '@/components/status-badge';
-import { ArrowLeft, Play, Camera, FileUp, MessageSquare, Send, MapPin, AlertTriangle, Loader2 } from 'lucide-react';
+import { ArrowLeft, Play, Camera, FileUp, MessageSquare, Send, MapPin, AlertTriangle, Loader2, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { FadeIn } from '@/components/ui/animate';
@@ -25,6 +25,7 @@ export function PortalTaskDetail({ id }: { id: string }) {
   const [gpsLoading, setGpsLoading] = useState(false);
   const [note, setNote] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [evidenceUploading, setEvidenceUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const fetchData = useCallback(() => {
@@ -73,6 +74,92 @@ export function PortalTaskDetail({ id }: { id: string }) {
   }, []);
 
   useEffect(() => { captureGps(); }, [captureGps]);
+
+  // Promise-based fresh GPS read for evidence capture (does not rely on state).
+  const getFreshGps = useCallback((): Promise<{ latitude: number | null; longitude: number | null; accuracy: number | null; altitude: number | null; heading: number | null; speed: number | null; timestamp: number | null }> => {
+    return new Promise((resolve) => {
+      if (!navigator?.geolocation) {
+        resolve({ latitude: null, longitude: null, accuracy: null, altitude: null, heading: null, speed: null, timestamp: null });
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({
+          latitude: pos?.coords?.latitude ?? null,
+          longitude: pos?.coords?.longitude ?? null,
+          accuracy: pos?.coords?.accuracy ?? null,
+          altitude: pos?.coords?.altitude ?? null,
+          heading: pos?.coords?.heading ?? null,
+          speed: pos?.coords?.speed ?? null,
+          timestamp: pos?.timestamp ?? Date.now(),
+        }),
+        () => resolve({ latitude: null, longitude: null, accuracy: null, altitude: null, heading: null, speed: null, timestamp: null }),
+        { enableHighAccuracy: true, timeout: 15000 }
+      );
+    });
+  }, []);
+
+  // Tamper-evident field photo evidence: capture fresh GPS, upload the ORIGINAL,
+  // then register it so the server can hash it and generate the watermark.
+  const handleEvidencePhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e?.target?.files?.[0];
+    if (e?.target) e.target.value = '';
+    if (!file) return;
+    if (!task?.job?.id) { toast.error('Work order not loaded yet'); return; }
+    setEvidenceUploading(true);
+    const localUuid = (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const capturedAt = new Date().toISOString();
+    try {
+      const fresh = await getFreshGps();
+      setGps({ latitude: fresh.latitude, longitude: fresh.longitude, accuracy: fresh.accuracy });
+
+      const presignRes = await fetch('/api/upload/presigned', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, contentType: file.type, isPublic: false }),
+      });
+      if (!presignRes.ok) throw new Error('Failed to prepare upload');
+      const { uploadUrl, cloud_storage_path } = await presignRes.json();
+
+      await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+
+      const res = await fetch('/api/portal/photo-evidence', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          localUuid,
+          jobId: task.job.id,
+          taskId: id,
+          originalStoragePath: cloud_storage_path,
+          originalFileName: file.name,
+          originalContentType: file.type || 'image/jpeg',
+          latitude: fresh.latitude,
+          longitude: fresh.longitude,
+          gpsAccuracyMeters: fresh.accuracy,
+          altitude: fresh.altitude,
+          heading: fresh.heading,
+          speed: fresh.speed,
+          locationCapturedAt: fresh.timestamp ? new Date(fresh.timestamp).toISOString() : null,
+          capturedAt,
+        }),
+      });
+      const data = await res.json();
+      if (res.status === 422 && data?.code === 'GPS_POLICY') {
+        toast.error(data?.error || 'LOCATION REQUIRED — enable location and try again');
+        return;
+      }
+      if (!res.ok) throw new Error(data?.error || 'Evidence capture failed');
+      if (data?.warn && data?.message) toast.warning(data.message);
+      if (data?.status === 'FAILED') {
+        toast.warning(`Evidence ${data.evidenceRef} saved — watermark will be regenerated`);
+      } else {
+        toast.success(`Evidence ${data.evidenceRef} captured`);
+      }
+      fetchData();
+    } catch (err: any) {
+      console.error('Evidence capture error:', err);
+      toast.error(err?.message || 'Evidence capture failed');
+    } finally {
+      setEvidenceUploading(false);
+    }
+  };
 
   const handleStartTask = async () => {
     try {
@@ -223,12 +310,23 @@ export function PortalTaskDetail({ id }: { id: string }) {
 
         {task?.status === 'IN_PROGRESS' && (
           <>
+            <label className="cursor-pointer block">
+              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleEvidencePhoto} disabled={evidenceUploading || uploading} />
+              <div className="flex flex-col items-center justify-center gap-2 p-5 bg-primary/10 rounded-lg border-2 border-primary/40 hover:border-primary transition-colors">
+                <ShieldCheck className="w-8 h-8 text-primary" />
+                <span className="text-sm font-semibold">Take Evidence Photo</span>
+                <span className="text-[11px] text-muted-foreground text-center">GPS-tagged &amp; watermarked. Original preserved.</span>
+              </div>
+            </label>
+
+            {evidenceUploading && <div className="text-center py-2"><Loader2 className="w-5 h-5 animate-spin mx-auto" /><p className="text-xs text-muted-foreground">Capturing evidence...</p></div>}
+
             <div className="grid grid-cols-2 gap-3">
               <label className="cursor-pointer">
                 <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e: any) => handleUpload(e, 'PHOTO')} disabled={uploading} />
                 <div className="flex flex-col items-center justify-center gap-2 p-4 bg-muted/50 rounded-lg border-2 border-dashed border-muted-foreground/30 hover:border-primary/50 transition-colors">
                   <Camera className="w-8 h-8 text-primary" />
-                  <span className="text-sm font-medium">Take Photo</span>
+                  <span className="text-sm font-medium">Quick Photo</span>
                 </div>
               </label>
               <label className="cursor-pointer">

@@ -10,7 +10,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 
-export type CounterKey = 'ESTIMATE' | 'QUOTE' | 'INVOICE' | 'WORKORDER' | 'STATEMENT';
+export type CounterKey = 'ESTIMATE' | 'QUOTE' | 'INVOICE' | 'WORKORDER' | 'STATEMENT' | 'PHOTO_EVIDENCE';
 
 const DEFAULTS: Record<CounterKey, { prefix: string; padding: number }> = {
   ESTIMATE: { prefix: 'EST', padding: 5 },
@@ -18,6 +18,7 @@ const DEFAULTS: Record<CounterKey, { prefix: string; padding: number }> = {
   INVOICE: { prefix: 'INV', padding: 5 },
   WORKORDER: { prefix: 'WO', padding: 5 },
   STATEMENT: { prefix: 'STAT', padding: 5 },
+  PHOTO_EVIDENCE: { prefix: 'EV', padding: 6 },
 };
 
 type Tx = Prisma.TransactionClient | PrismaClient;

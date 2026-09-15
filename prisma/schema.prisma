@@ -118,6 +118,7 @@ model User {
   mfaRecoveryCodes    MfaRecoveryCode[]
   mobileDevices       MobileDevice[]
   mobileSessions      MobileSession[]
+  fieldPhotoEvidence  FieldPhotoEvidence[]
 
   @@index([email])
   @@index([status])
@@ -306,6 +307,7 @@ model Job {
   workerLocations                WorkerLocation[]
   geoEvents                      GeoEvent[]
   evidencePackages               FieldEvidencePackage[]
+  fieldPhotoEvidence             FieldPhotoEvidence[]
   documentationWorkflowVersionId String?
   documentationWorkflowVersion   DocumentationWorkflowVersion? @relation(fields: [documentationWorkflowVersionId], references: [id])
   cables                         Cable[]
@@ -354,6 +356,7 @@ model Task {
   payoutRecord             PayoutRecord?          @relation(fields: [payoutRecordId], references: [id])
   activityLogs             ActivityLog[]
   evidencePackages         FieldEvidencePackage[]
+  fieldPhotoEvidence       FieldPhotoEvidence[]
 
   @@index([jobId])
   @@index([workerId])
@@ -1973,4 +1976,108 @@ model HostedDomain {
 
   @@index([status])
   @@index([isPrimary])
+}
+
+// ============================================================================
+// FIELD PHOTO GPS / LOGO WATERMARK EVIDENCE (workstream — field photo evidence)
+// A field technician takes a photo for a Work Order (Job) / Task. OS1 captures
+// GPS + context, preserves the ORIGINAL bytes unchanged, and generates a
+// separate server-side watermarked derivative. Nothing here supersedes the
+// existing FieldEvidencePackage flow — it is an additive, dedicated model that
+// reuses the same work identity (Job=WorkOrder, Task, User=technician).
+// ============================================================================
+
+// Singleton (id="default") controlling watermark rendering + GPS policy.
+model WatermarkSettings {
+  id                String   @id @default("default")
+  enabled           Boolean  @default(true)
+  showLogo          Boolean  @default(true)
+  showCompanyName   Boolean  @default(true)
+  showWorkOrder     Boolean  @default(true)
+  showProject       Boolean  @default(true)
+  showTaskCode      Boolean  @default(true)
+  showTechnician    Boolean  @default(true)
+  showGpsCoords     Boolean  @default(true)
+  showGpsAccuracy   Boolean  @default(true)
+  showAddress       Boolean  @default(true)
+  showDate          Boolean  @default(true)
+  showTime          Boolean  @default(true)
+  showCompassHeading Boolean @default(false)
+  showPhotoReference Boolean @default(true)
+  position          String   @default("BOTTOM") // BOTTOM | TOP
+  opacityPercent    Int      @default(55) // panel opacity 0-100
+  gpsPolicy         String   @default("REQUIRED") // REQUIRED | WARN | OPTIONAL
+  maxAccuracyMeters Int      @default(30) // company max acceptable accuracy
+  updatedAt         DateTime @updatedAt
+}
+
+model FieldPhotoEvidence {
+  id                     String   @id @default(cuid())
+  evidenceRef            String   @unique // human-readable EV-000001
+  localUuid              String   @unique // client UUID; idempotent retry (§11/§22)
+  jobId                  String
+  job                    Job      @relation(fields: [jobId], references: [id])
+  taskId                 String?
+  task                   Task?    @relation(fields: [taskId], references: [id])
+  capturedByUserId       String
+  capturedBy             User     @relation(fields: [capturedByUserId], references: [id])
+  // Snapshot scalars (no relations — preserve context even if source changes).
+  projectId              String?
+  primeContractorId      String?
+  deviceId               String?
+  technicianName         String? // denormalized technician display name at capture
+
+  // ORIGINAL (never mutated — §1/§2/§15).
+  originalStoragePath    String
+  originalSha256         String
+  originalFileName       String
+  originalContentType    String
+  originalSizeBytes      Int
+
+  // WATERMARKED derivative (separate object + hash — §2/§8).
+  watermarkedStoragePath String?
+  watermarkedSha256      String?
+  watermarkedContentType String?
+  watermarkGeneratedAt   DateTime?
+  watermarkError         String? // populated if server-side generation failed
+
+  // GPS / location (§3). Captured values are immutable field truth.
+  latitude               Float?
+  longitude              Float?
+  gpsAccuracyMeters      Float?
+  altitude               Float?
+  heading                Float?
+  speed                  Float?
+  locationCapturedAt     DateTime?
+  address                String? // reverse-geocoded (optional)
+  accuracyClass          String? // HIGH | ACCEPTABLE | LOW (§4)
+  gpsPolicyAtCapture     String? // policy snapshot at capture time
+
+  // ADMIN GPS correction (§14) — never rewrites captured values silently.
+  correctedLatitude      Float?
+  correctedLongitude     Float?
+  correctionReason       String?
+  correctedByUserId      String?
+  correctedAt            DateTime?
+
+  // Tamper / audit (§9).
+  capturedAt             DateTime // device timestamp of capture (field truth, not upload)
+  receivedAt             DateTime @default(now()) // server receipt
+  status                 String   @default("UPLOADED") // UPLOADED | WATERMARKED | FAILED | SUPERSEDED
+  notes                  String?
+
+  // Supersede / revision chain (§9 — no silent replacement).
+  supersedesId           String?
+  supersedes             FieldPhotoEvidence?  @relation("PhotoSupersede", fields: [supersedesId], references: [id])
+  supersededBy           FieldPhotoEvidence[] @relation("PhotoSupersede")
+  revision               Int      @default(1)
+
+  createdAt              DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([jobId])
+  @@index([taskId])
+  @@index([capturedByUserId])
+  @@index([status])
+  @@index([capturedAt])
 }

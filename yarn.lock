@@ -11068,6 +11068,7 @@ __metadata:
     react-select: "npm:5.8.0"
     react-use: "npm:17.6.0"
     recharts: "npm:2.15.3"
+    sharp: "npm:^0.35.3"
     sonner: "npm:1.5.0"
     swr: "npm:2.2.4"
     tailwind-merge: "npm:2.5.2"

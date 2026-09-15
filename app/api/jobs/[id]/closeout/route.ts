@@ -45,6 +45,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         cables: { include: { fiberPositions: true } },
         splicePoints: { include: { mappings: true } },
         evidencePackages: { include: { assets: true } },
+        fieldPhotoEvidence: {
+          where: { status: 'WATERMARKED', watermarkedStoragePath: { not: null } },
+          select: {
+            evidenceRef: true,
+            watermarkedStoragePath: true,
+            watermarkedContentType: true,
+          },
+        },
       },
     });
     if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
@@ -87,6 +95,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           contentType: a.contentType,
         });
       }
+    }
+
+    // Field photo evidence (§13): only the WATERMARKED derivative is customer-facing.
+    // The original bytes are never packaged for the client. The watermark overlay
+    // carries no financial data (WO#, project, task, tech, GPS, time only).
+    for (const ev of job.fieldPhotoEvidence) {
+      if (!ev.watermarkedStoragePath) continue;
+      assets.push({
+        cloudStoragePath: ev.watermarkedStoragePath,
+        fileName: `${ev.evidenceRef}.jpg`,
+        category: 'PHOTO',
+        contentType: ev.watermarkedContentType ?? 'image/jpeg',
+      });
     }
 
     // Next immutable revision number.
