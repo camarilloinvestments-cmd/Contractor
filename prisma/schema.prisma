@@ -2105,3 +2105,162 @@ model EvidenceUploadReservation {
   @@index([userId])
   @@index([expiresAt])
 }
+
+// =====================================================================
+// AI Help — OpenAI Work Intake (v1.2.0, isolated additive feature)
+// -----------------------------------------------------------------
+// OpenAI READS/EXTRACTS/CLASSIFIES untrusted Prime work requests into a
+// strict, validated, versioned structured DRAFT. It NEVER creates
+// operational or financial records. OS1 remains authoritative: an operator
+// must explicitly review and Approve a draft before any Work Order (Job) or
+// Task is created through the existing Prime -> Project -> PriceBook ->
+// immutable Version -> WorkOrder -> Task path.
+//
+// Foreign keys to frozen models (PrimeContractor, Project, User, Job,
+// TaskType) are stored as plain scalar IDs WITHOUT Prisma relations so the
+// existing models are not modified (full isolation / additive-only).
+// =====================================================================
+
+enum AiIntakeStatus {
+  NEW
+  ANALYZING
+  NEEDS_REVIEW
+  READY
+  APPROVED
+  IMPORTED
+  REJECTED
+  FAILED
+}
+
+// Singleton OpenAI integration settings for AI Help. The API key is stored
+// ONLY as AES-256-GCM ciphertext (lib/crypto.ts); it is never returned to the
+// browser, logged, or embedded in source. Business logic is never hardcoded to
+// a specific model name — the normal + fallback models are configurable.
+model AiIntakeSettings {
+  id              String    @id @default("default")
+  enabled         Boolean   @default(false)
+  apiKeyEncrypted String? // ciphertext only — never plaintext
+  apiBase         String?   @default("https://api.openai.com/v1")
+  normalModel     String    @default("gpt-4o-mini")
+  fallbackModel   String    @default("gpt-4o")
+  schemaVersion   String    @default("1")
+  lastSuccessAt   DateTime?
+  lastModelUsed   String?
+  lastError       String?
+  lastErrorAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model AiWorkIntake {
+  id                String         @id @default(cuid())
+  intakeNumber      String         @unique
+  status            AiIntakeStatus @default(NEW)
+  primeContractorId String
+  projectId         String?
+  title             String?
+  pastedText        String?
+  // AI outputs (draft only)
+  model             String?
+  modelUsed         String?
+  usedFallback      Boolean        @default(false)
+  schemaVersion     String?
+  structuredDraft   Json?
+  priorityRawText   String?
+  priorityOrder     Json?
+  warnings          Json?
+  confidenceSummary Json?
+  // lifecycle
+  error             String?
+  analyzedAt        DateTime?
+  createdById       String
+  approvedById      String?
+  approvedAt        DateTime?
+  rejectedById      String?
+  rejectedAt        DateTime?
+  rejectionReason   String?
+  resultingJobId    String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  sources AiIntakeSource[]
+  items   AiIntakeItem[]
+
+  @@index([status])
+  @@index([primeContractorId])
+  @@index([projectId])
+  @@index([createdById])
+  @@index([resultingJobId])
+}
+
+model AiIntakeSource {
+  id               String       @id @default(cuid())
+  intakeId         String
+  intake           AiWorkIntake @relation(fields: [intakeId], references: [id], onDelete: Cascade)
+  kind             String // email | pdf | image | drawing | csv | xlsx | text
+  originalFilename String?
+  contentType      String?
+  storagePath      String? // S3 key; null for pasted text
+  sizeBytes        Int?
+  sha256           String?
+  sentToAi         Boolean      @default(false)
+  extractionInfo   Json? // which pages/sheets/text-chars were actually sent
+  createdAt        DateTime     @default(now())
+
+  @@index([intakeId])
+}
+
+model AiIntakeItem {
+  id                  String       @id @default(cuid())
+  intakeId            String
+  intake              AiWorkIntake @relation(fields: [intakeId], references: [id], onDelete: Cascade)
+  orderIndex          Int          @default(0)
+  deviceId            String // preserved EXACTLY as supplied (e.g. SP0653, NP0003.C1)
+  proposedType        String?
+  routeSection        String?
+  instructions        String?
+  reentryRequired     Boolean      @default(false)
+  reentryReason       String?
+  partialWorkAllowed  Boolean      @default(false)
+  blockedDependency   String?
+  dependencies        Json?
+  confidence          Float        @default(0)
+  requiresReview      Boolean      @default(false)
+  reviewReason        String?
+  sourceReference     String?
+  possibleDuplicate   Boolean      @default(false)
+  duplicateOfJobId    String?
+  proposedBillingCode String? // AI SUGGESTION ONLY — never auto-applied as a billing code
+  // operator review + mapping (set at review time, never by AI)
+  reviewStatus        String       @default("PENDING") // PENDING | EDITED | APPROVED | REJECTED
+  mappedTaskTypeId    String?
+  confirmedJobCode    String? // operator-confirmed billing code from pinned version
+  quantity            Float?
+  resultingTaskId     String?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  @@index([intakeId])
+  @@index([deviceId])
+}
+
+// Prime/Project-scoped saved terminology + convention rules. NEVER universal
+// across all primes — every rule is scoped to a prime (and optionally a
+// project). Feeds the AI as approved context and drives requires_review when a
+// referenced term has no approved definition.
+model PrimeProjectAiRule {
+  id                String   @id @default(cuid())
+  primeContractorId String
+  projectId         String? // null = prime-wide (still scoped to that prime)
+  ruleType          String // device_prefix | route_naming | enclosure_term | nap_convention | priority_term | evidence_expectation | other
+  term              String
+  definition        String
+  active            Boolean  @default(true)
+  createdById       String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([primeContractorId, projectId, ruleType, term])
+  @@index([primeContractorId])
+  @@index([projectId])
+}

@@ -6,6 +6,7 @@ import {
   LayoutDashboard, Building2, Briefcase, Wrench, Users, FileText,
   DollarSign, BarChart3, Settings, LogOut, Cable, ChevronLeft, ChevronRight, HardHat, Coins, TrendingUp,
   Map, Route, DownloadCloud, ClipboardCheck, TabletSmartphone, FileEdit, FileCheck2, Receipt, ChevronDown, Camera,
+  Sparkles, Bot,
   type LucideIcon,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
@@ -76,6 +77,14 @@ const navGroups: NavGroup[] = [
       { href: '/evidence', label: 'Evidence Review', icon: ClipboardCheck, roles: ['ADMIN', 'PROJECT_MANAGER'] },
       { href: '/evidence/photos', label: 'Field Photos', icon: Camera, roles: ['ADMIN', 'PROJECT_MANAGER'] },
       { href: '/system/devices', label: 'Device Management', icon: TabletSmartphone, roles: ['ADMIN'] },
+    ],
+  },
+  {
+    id: 'ai-help',
+    label: 'AI Help',
+    items: [
+      { href: '/ai-help', label: 'Work Intake', icon: Sparkles, roles: ['ADMIN', 'PROJECT_MANAGER'] },
+      { href: '/ai-help/settings', label: 'AI Settings', icon: Bot, roles: ['ADMIN'] },
     ],
   },
   {
